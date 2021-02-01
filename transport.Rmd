@@ -1,0 +1,1027 @@
+---
+title: "Transport"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=FALSE, message=FALSE, warning=FALSE)
+# library(flexdashboard)
+library(tidyverse)
+library(sf)
+library(tmap)
+library(maptools)
+# library(janitor)
+# library(kableExtra)
+library(tigris)
+options(tigris_use_cache = TRUE, tigris_class = "sf")
+library(leaflet)
+library(leaflet.extras)
+library(DT)
+library(rmapshaper)
+# set common data table options
+# options(DT.options = list(scrollY="100vh", lengthMenu = c(5, 10, 15, 20)))
+options(DT.options = list(lengthMenu = c(10, 20, 50, 100)))
+library(highcharter)
+library(tidycensus)
+library(geojsonio)
+```
+
+```{r data, include=FALSE, cache=TRUE}
+# Read in no transit access. Whole census units with no transit access. Includes nh_busBuff400m_sf with counts of pop with access to bus. 
+load("../DATA/transport/NH/noTransit.Rds")
+
+# Read in walkability data. Whole census units with walkability scores. Need to isolate least walkable as <= 5.8
+load("../DATA/transport/NH/walkability.Rds")
+
+# Read in transportation cost burden data. Whole census units. Need to isolate 80th percentile. 
+load("../DATA/transport/NH/costBurden.Rds")
+
+# load("DATA/ne_layers.rds")
+nh_blkgrps_sf <- readRDS(file = "../DATA/nh_blkgrps_sf_CUM.Rds")
+
+#create layer of municipalities
+nh_towns <- county_subdivisions("NH") %>% 
+  st_transform(., crs = 4326) %>% 
+  select(GEOID,NAME,NAMELSAD)
+
+# Assign municipality names to block groups
+nh_blkgrps_sf <- county_subdivisions("NH") %>% 
+  st_transform(., crs = st_crs(nh_blkgrps_sf)) %>% 
+  transmute(TOWN = NAMELSAD, GEOIDTN = GEOID) %>% 
+  st_join(nh_blkgrps_sf, ., largest = TRUE) %>% 
+  mutate(NAME = str_remove_all(NAME, ", New Hampshire")) %>% 
+  st_transform(., crs = 4326)
+
+# create layer of state house districts
+house_districts <- geojson_read("https://opendata.arcgis.com/datasets/f264be37ee714132b268924c44b91803_2.geojson", what = "sp") %>% 
+  st_as_sf(.) %>% 
+  transmute(REP_DIST = NHHouse201) %>%
+  st_transform(., crs = 4326) %>% 
+  st_make_valid()
+
+# create layer of state senate districts
+senate_districts <- geojson_read("https://opendata.arcgis.com/datasets/df824f020357423b9f23384f80d9e2d1_4.geojson", what = "sp") %>% 
+  st_as_sf(.) %>% 
+  transmute(SEN_DIST = Senate2012) %>% 
+  st_transform(., crs = 4326) %>% 
+  st_make_valid()
+
+# Assign state house district names to block groups
+nh_blkgrps_sf <- house_districts %>% 
+  select(REP_DIST) %>% 
+  st_join(nh_blkgrps_sf, ., largest = TRUE)
+
+# Assign state senate district names to block groups
+nh_blkgrps_sf <- senate_districts %>% 
+  select(SEN_DIST) %>% 
+  st_join(nh_blkgrps_sf, ., largest = TRUE)
+
+# identify block groups with no bus access
+nh_blkgrps_sf <- nh_blkgrps_sf_noBus %>% 
+  as.data.frame() %>% 
+  transmute(GEOID = GEOID, NoBusAccess = "Y") %>% 
+  left_join(nh_blkgrps_sf,., by = "GEOID") %>% 
+  replace_na(list(NoBusAccess = "N"))
+
+# join walkability scores and add category labels
+nh_blkgrps_sf <- nh_blkgrp_walkability_sf %>% 
+  as.data.frame() %>% 
+  select(GEOID, NatWalkInd) %>% 
+  left_join(nh_blkgrps_sf, ., by = "GEOID") %>% 
+  mutate(WalkCat = case_when(
+    NatWalkInd < 5.76 ~ "Least Walkable",
+    NatWalkInd >= 5.76 & NatWalkInd < 10.51 ~ "Below Avg Walkable",
+    NatWalkInd >= 10.51 & NatWalkInd < 15.26 ~ "Above Avg Walkable",
+    NatWalkInd >= 15.26 ~ "Most Walkable"
+  ))
+
+# join transport cost burden data
+nh_blkgrps_sf <- lai_nh_blkgrp %>% 
+  as.data.frame() %>% 
+  select(GEOID, hh7_t, hh7_h) %>% 
+  left_join(nh_blkgrps_sf, ., by = "GEOID")
+
+# Create labeling variables to identify pops of a concern in a given block group that contributed to cumulative burden score
+nh_blkgrps_sf <- nh_blkgrps_sf %>% 
+  mutate(Minority80th = if_else(percent_rank(minority_pctE) >= 0.8, "People of Color","NA"),
+    Under5_80th = if_else(percent_rank(pct_under5E) >= 0.8, "Under 5", "NA"),
+    Under18_80th = if_else(percent_rank(pct_under18E) >= 0.8, "Under 18", "NA"),
+    Over64_80th = if_else(percent_rank(pct_over64E) >= 0.8, "Over 64", "NA"),
+    lths80th = if_else(percent_rank(pct_lthsE) >= 0.8, "No HS Diploma", "NA"),
+    pct2pov80th = if_else(percent_rank(pct2povE) >= 0.8, "Low Income", "NA"),
+    eng_limit_pct80th = if_else(percent_rank(eng_limit_pctE) >= 0.8, "Limited English HH", "NA"),
+    POPSlabel = gsub("^,*|(?<=,),|,*$", "", # get rid of extra commas
+    str_remove_all( # get rid of NAs
+      paste(Minority80th,
+            Under5_80th,
+            Under18_80th,
+            Over64_80th,
+            lths80th,
+            pct2pov80th,
+            eng_limit_pct80th, sep = ","),
+      pattern = "NA"), 
+    perl=T
+    ),
+    POPSlabel = if_else(POPSlabel == "", "No Pops of Concern", POPSlabel),
+    Walkpctile = percent_rank(NatWalkInd)*100,
+    Tcostpctile = percent_rank(hh7_t)*100
+    )
+  # filter(POPSlabel != "No Pops of Concern")
+
+# create summary stats of transport values by municipality
+# muniTransport <- nh_blkgrps_sf %>%
+#   as.data.frame() %>% 
+#   select(TOWN, AvgStopHeadway, NatWalkInd, hh7_t) %>% 
+#   group_by(TOWN) %>% 
+#   summarize(across(.cols = everything(), 
+#                    list(min = min, mean = mean, max = max),
+#                    na.rm = TRUE,
+#                    .names = "{.col}.{.fn}")) %>% 
+#   mutate(across(ends_with("mean"), 
+#                 ~percent_rank(.x)*100,
+#                 .names = "pctrank_{.col}"))
+
+muniTransport <- nh_blkgrps_sf %>%
+  select(NatWalkInd, hh7_t) %>% 
+  mutate(OldArea = as.numeric(st_area(.))) %>% 
+  st_intersection(nh_towns) %>% 
+  mutate(NewArea = as.numeric(st_area(.)),
+         Prop = NewArea/OldArea) %>% 
+  as.data.frame() %>% 
+  group_by(NAMELSAD) %>% 
+  summarize(across(.cols = c(NatWalkInd, hh7_t), 
+                   ~weighted.mean(.x, w = Prop, na.rm = TRUE),
+                   .names = "{.col}.mean")) %>% 
+  mutate(across(ends_with("mean"), 
+                ~percent_rank(.x)*100,
+                .names = "pctrank_{.col}")) %>% 
+  rename(TOWN = NAMELSAD)
+
+# create summary of transport values by house district
+houseTransport <- nh_blkgrps_sf %>%
+  as.data.frame() %>% 
+  select(REP_DIST, NatWalkInd, hh7_t) %>% 
+  group_by(REP_DIST) %>% 
+  summarize(across(.cols = everything(), 
+                   list(min = min, mean = mean, max = max),
+                   na.rm = TRUE,
+                   .names = "{.col}.{.fn}")) %>% 
+  mutate(across(ends_with("mean"), 
+                ~percent_rank(.x)*100,
+                .names = "pctrank_{.col}"))
+
+# create summary of transport values by senate district
+senateTransport <- nh_blkgrps_sf %>%
+  as.data.frame() %>% 
+  select(SEN_DIST, NatWalkInd, hh7_t) %>% 
+  group_by(SEN_DIST) %>% 
+  summarize(across(.cols = everything(), 
+                   list(min = min, mean = mean, max = max),
+                   na.rm = TRUE,
+                   .names = "{.col}.{.fn}")) %>% 
+  mutate(across(ends_with("mean"), 
+                ~percent_rank(.x)*100,
+                .names = "pctrank_{.col}"))
+
+# Create counts of block groups with No Bus Access by jurisdiction
+muniNoBus <- nh_blkgrps_sf %>% 
+  as.data.frame() %>% 
+  filter(NoBusAccess == "Y" & POPSlabel != "No Pops of Concern") %>% 
+  group_by(TOWN) %>% 
+  summarize(BGsNoBus = n())
+
+houseNoBus <- nh_blkgrps_sf %>% 
+  as.data.frame() %>% 
+  filter(NoBusAccess == "Y" & POPSlabel != "No Pops of Concern") %>% 
+  group_by(REP_DIST) %>% 
+  summarize(BGsNoBus = n())
+
+senateNoBus <- nh_blkgrps_sf %>% 
+  as.data.frame() %>% 
+  filter(NoBusAccess == "Y" & POPSlabel != "No Pops of Concern") %>% 
+  group_by(SEN_DIST) %>% 
+  summarize(BGsNoBus = n())
+
+
+# Create counts of block groups Least Walkable by jurisdiction
+muniWalk <- nh_blkgrps_sf %>% 
+  as.data.frame() %>% 
+  filter(WalkCat == "Least Walkable" & POPSlabel != "No Pops of Concern") %>% 
+  group_by(TOWN) %>% 
+  summarize(BGsLWalk = n())
+
+houseWalk <- nh_blkgrps_sf %>% 
+  as.data.frame() %>% 
+  filter(WalkCat == "Least Walkable" & POPSlabel != "No Pops of Concern") %>% 
+  group_by(REP_DIST) %>% 
+  summarize(BGsLWalk = n())
+
+senateWalk <- nh_blkgrps_sf %>% 
+  as.data.frame() %>% 
+  filter(WalkCat == "Least Walkable" & POPSlabel != "No Pops of Concern") %>% 
+  group_by(SEN_DIST) %>% 
+  summarize(BGsLWalk = n())
+
+# Create counts of block groups at 80th percentile transport cost burden by jurisdiction
+muniTcost_80th <- nh_blkgrps_sf %>% 
+  as.data.frame() %>% 
+  filter(Tcostpctile >= 80 & POPSlabel != "No Pops of Concern") %>% 
+  group_by(TOWN) %>% 
+  summarize(BGs80thTcost = n())
+
+houseTcost_80th <- nh_blkgrps_sf %>% 
+  as.data.frame() %>% 
+  filter(Tcostpctile >= 80 & POPSlabel != "No Pops of Concern") %>% 
+  group_by(REP_DIST) %>% 
+  summarize(BGs80thTcost = n())
+
+senateTcost_80th <- nh_blkgrps_sf %>% 
+  as.data.frame() %>% 
+  filter(Tcostpctile >= 80 & POPSlabel != "No Pops of Concern") %>% 
+  group_by(SEN_DIST) %>% 
+  summarize(BGs80thTcost = n())
+
+# join stats to jurisdiction layers
+nh_towns <- nh_towns %>% 
+  left_join(., muniTransport, by = c("NAMELSAD" = "TOWN")) %>% 
+  left_join(., muniNoBus, by = c("NAMELSAD" = "TOWN")) %>%  
+  left_join(., muniWalk, by = c("NAMELSAD" = "TOWN")) %>% 
+  left_join(., muniTcost_80th, by = c("NAMELSAD" = "TOWN")) %>%
+  replace_na(list(BGsNoBus = 0, BGsLWalk = 0, BGs80thTcost = 0)) %>% 
+  ms_simplify(., keep = 0.1, keep_shapes = TRUE)
+
+house_districts <- house_districts %>% 
+  left_join(., houseTransport, by = "REP_DIST") %>% 
+  left_join(., houseNoBus, by = "REP_DIST") %>% 
+  left_join(., houseWalk, by = "REP_DIST") %>% 
+  left_join(., houseTcost_80th, by = "REP_DIST") %>% 
+  replace_na(list(BGsNoBus = 0, BGsLWalk = 0, BGs80thTcost = 0)) %>% 
+  mutate(WalkCat.min = case_when(
+           NatWalkInd.min < 5.76 ~ "Least Walkable",
+           NatWalkInd.min >= 5.76 & NatWalkInd.min < 10.51 ~ 
+             "Below Avg Walkable",
+           NatWalkInd.min >= 10.51 & NatWalkInd.min < 15.26 ~ 
+             "Above Avg Walkable",
+           NatWalkInd.min >= 15.26 ~ "Most Walkable"
+           ),
+         WalkCat.mean = case_when(
+           NatWalkInd.mean < 5.76 ~ "Least Walkable",
+           NatWalkInd.mean >= 5.76 & NatWalkInd.mean < 10.51 ~ 
+             "Below Avg Walkable",
+           NatWalkInd.mean >= 10.51 & NatWalkInd.mean < 15.26 ~ 
+             "Above Avg Walkable",
+           NatWalkInd.mean >= 15.26 ~ "Most Walkable"
+           ),
+         WalkCat.max = case_when(
+           NatWalkInd.max < 5.76 ~ "Least Walkable",
+           NatWalkInd.max >= 5.76 & NatWalkInd.max < 10.51 ~ 
+             "Below Avg Walkable",
+           NatWalkInd.max >= 10.51 & NatWalkInd.max < 15.26 ~ 
+             "Above Avg Walkable",
+           NatWalkInd.max >= 15.26 ~ "Most Walkable")
+         ) %>% 
+  ms_simplify(., keep = 0.1, keep_shapes = TRUE)
+
+senate_districts <- senate_districts %>% 
+  left_join(., senateTransport, by = "SEN_DIST") %>% 
+  left_join(., senateNoBus, by = "SEN_DIST") %>% 
+  left_join(., senateWalk, by = "SEN_DIST") %>% 
+  left_join(., senateTcost_80th, by = "SEN_DIST") %>%
+  replace_na(list(BGsNoBus = 0, BGsLWalk = 0, BGs80thTcost = 0)) %>% 
+  mutate(WalkCat.min = case_when(
+           NatWalkInd.min < 5.76 ~ "Least Walkable",
+           NatWalkInd.min >= 5.76 & NatWalkInd.min < 10.51 ~ 
+             "Below Avg Walkable",
+           NatWalkInd.min >= 10.51 & NatWalkInd.min < 15.26 ~ 
+             "Above Avg Walkable",
+           NatWalkInd.min >= 15.26 ~ "Most Walkable"
+           ),
+         WalkCat.mean = case_when(
+           NatWalkInd.mean < 5.76 ~ "Least Walkable",
+           NatWalkInd.mean >= 5.76 & NatWalkInd.mean < 10.51 ~ 
+             "Below Avg Walkable",
+           NatWalkInd.mean >= 10.51 & NatWalkInd.mean < 15.26 ~ 
+             "Above Avg Walkable",
+           NatWalkInd.mean >= 15.26 ~ "Most Walkable"
+           ),
+         WalkCat.max = case_when(
+           NatWalkInd.max < 5.76 ~ "Least Walkable",
+           NatWalkInd.max >= 5.76 & NatWalkInd.max < 10.51 ~ 
+             "Below Avg Walkable",
+           NatWalkInd.max >= 10.51 & NatWalkInd.max < 15.26 ~ 
+             "Above Avg Walkable",
+           NatWalkInd.max >= 15.26 ~ "Most Walkable")
+         ) %>% 
+  ms_simplify(., keep = 0.1, keep_shapes = TRUE)
+
+# create layer of nh_blkgrp_sf for 80th percentile and thresholds
+nh_blkgrps_sf_NoBus <- nh_blkgrps_sf %>% 
+  filter(NoBusAccess == "Y" & POPSlabel != "No Pops of Concern") %>% 
+  select(NAME, REP_DIST, SEN_DIST, TOWN, POPSlabel) %>% 
+  ms_simplify(., keep = 0.1, keep_shapes = TRUE)
+
+nh_blkgrps_sf_Walk <- nh_blkgrps_sf %>% 
+  filter(NatWalkInd < 5.76 & POPSlabel != "No Pops of Concern") %>% 
+  select(NAME, REP_DIST, SEN_DIST, TOWN, POPSlabel, NatWalkInd, Walkpctile, 
+         WalkCat) %>% 
+  ms_simplify(., keep = 0.1, keep_shapes = TRUE)
+
+nh_blkgrps_sf_Tcost <- nh_blkgrps_sf %>% 
+  filter(Tcostpctile >= 80 & POPSlabel != "No Pops of Concern") %>% 
+  select(NAME, REP_DIST, SEN_DIST, TOWN, POPSlabel, hh7_t, Tcostpctile) %>% 
+  ms_simplify(., keep = 0.1, keep_shapes = TRUE)
+
+# extract values for inline insertion
+Tcost80th <- round(quantile(nh_blkgrps_sf$hh7_t, 0.8, na.rm = T),1)
+
+# clean up "nh_blkgrps_sf$",
+rm(list = ls(pattern = paste("muni", "_80th", "headway80th", "_tract", "houseNoBus", "Transport", "houseWalk", "senateNoBus", "senateWalk", "lai_nh_blkgrp", "lai_ToverH", "_noTransit", "nh_blkgrps_sf_noBus", sep = "|"), ))
+```
+
+The most important benefit of a transportation system is the access it provides to opportunity – economic, educational, health care, civic life, and simple freedom of movement.  Lack of adequate access to transportation hinders these opportunities. 
+
+Most of New Hampshire’s bus services are either concentrated in a handful of cities or are inter-city services. Less than 25% of the state’s population
+lives within a reasonable distance of a bus route. The average transportation cost burden is 23% of household income for moderate income households, which is 44% higher than the US average. There are 35 census tracts where the transportation cost burdens exceeds housing cost burdens. This is 12% of all census tracts in the state. These were mostly found in the northern and
+western parts of New Hampshire.
+
+These interactive figures identify communities across New Hampshire that are most underserved and most sensitive to the quality of four transportation metrics: access to public transit, transit headways, neighborhood walkability, and transportation cost burden.  
+
+<br>
+
+## Transportation Adequacy & Priority Populations by Census block group {.tabset}
+
+### Bus Access
+```{r mapBus, fig.align="left", fig.cap="Map of Census block groups with the highest concentrations of one or more priority populations AND no bus stops within 1 mile."}
+# # create color palette
+# palPM25 <- colorQuantile(
+#   palette = "YlOrRd",
+#   domain = nh_blkgrps_sf_PM25$PM25_19,
+#   n = 5)
+
+# binpalPM25 <- colorBin(
+#   palette = "YlOrRd",
+#   domain = nh_blkgrps_sf_PM25$PM25_19,
+#   bins = 5, pretty = FALSE
+# )
+
+# create simplified towns layer for faster mapping
+# download state outline
+nh_state <- states(cb = TRUE) %>% 
+  filter(NAME == "New Hampshire")
+# filter out extra polygons, clip out boundaries from water, simplify
+nh_towns_simple <- nh_towns %>% 
+  filter(NAME != "County subdivisions not defined") %>% 
+  ms_clip(., nh_state) %>% 
+  ms_simplify(., keep = 0.1, keep_shapes = TRUE)
+
+PopupHouse <- paste0("New Hampshire state House District ", "<b>",house_districts$REP_DIST,"</b>", " has ", "<b>",house_districts$BGsNoBus,"</b>", " <b>Block Groups</b> with high percentages of priority populations and no reasonable access to a bus.")
+
+PopupSenate <- paste0("New Hampshire state Senate District ", "<b>",senate_districts$SEN_DIST,"</b>", " has ", "<b>",senate_districts$BGsNoBus,"</b>", " <b>Block Groups</b> with high percentages of priority populations and no reasonable access to a bus.")
+
+Popup <- paste0(nh_blkgrps_sf_NoBus$NAME, "<br/>",
+                "<b>State House District:</b> ", nh_blkgrps_sf_NoBus$REP_DIST, "<br/>",
+                  "<b>State Senate District:</b> ", nh_blkgrps_sf_NoBus$SEN_DIST, "<br/>",
+                      "<b>Town:</b> ", nh_blkgrps_sf_NoBus$TOWN, "<br/>",
+                      "<b>Priority Populations: </b>", nh_blkgrps_sf_NoBus$POPSlabel)
+
+leaflet(width = "100%") %>% 
+  addProviderTiles(providers$Stamen.TonerLite) %>% 
+  addPolygons(data = nh_towns_simple,
+              weight = 0.7,
+              opacity = 1,
+              color = "gray",
+              fillOpacity = 0,
+              label=~NAME, popup=~NAMELSAD, group='muni') %>% 
+  addPolygons(data = house_districts,
+              weight = 2,
+              opacity = 1,
+              color = "blue",
+              dashArray = 3,
+              fillOpacity = 0,
+              # fillColor = "blue",
+              label = ~REP_DIST,
+              popup = PopupHouse,
+              highlight = highlightOptions(
+                weight = 5,
+                color = "#666",
+                dashArray = "",
+                fillOpacity = 0,
+                bringToFront = TRUE),
+              group = "State House Districts") %>% 
+  addPolygons(data = senate_districts,
+              # fillColor = "red",
+              weight = 2,
+              opacity = 1,
+              color = "green",
+              dashArray = 3,
+              fillOpacity = 0,
+              label=~SEN_DIST,
+              popup = PopupSenate,
+              highlight = highlightOptions(
+                weight = 5,
+                color = "#666",
+                dashArray = "",
+                fillOpacity = 0,
+                bringToFront = TRUE),
+              group = "State Senate Districts") %>% 
+  addPolygons(data = nh_blkgrps_sf_NoBus, 
+              color = "red",
+              weight = 0.5,
+              opacity = 0.7,
+              # color = "white",
+              dashArray = 3,
+              fillOpacity = 0.7,
+              label=~TOWN, 
+              popup = Popup,
+              highlight = highlightOptions(
+                weight = 5,
+                color = "#666",
+                dashArray = "",
+                fillOpacity = 0.7,
+                bringToFront = TRUE)) %>% 
+  addLegend(colors = "red",
+            labels = "No Bus Access for Priority Pops",
+            position = "bottomleft") %>%
+  setView(lng = -71.5, 44, zoom = 7) %>% 
+  # addMiniMap() %>% 
+  addScaleBar(position = "bottomright") %>% 
+  addSearchFeatures(targetGroups  = 'muni', 
+                    options = searchFeaturesOptions(zoom=14, openPopup=TRUE, hideMarkerOnCollapse=T)) %>% 
+  addLayersControl(
+    overlayGroups = c("State House Districts","State Senate Districts"),
+    options = layersControlOptions(collapsed = TRUE)
+  ) %>% 
+  hideGroup(c("State House Districts","State Senate Districts"))
+```
+
+<br>
+
+<br>
+
+### Walkability
+```{r mapWalk, fig.align="left", fig.cap="Map of Census block groups with the highest concentrations of one or more priority populations AND least walkable scores."}
+# create color palette
+palWalk <- colorQuantile(
+  palette = "YlOrRd",
+  domain = nh_blkgrps_sf_Walk$NatWalkInd,
+  n = 5,
+  reverse = TRUE)
+
+# binpalPM25 <- colorBin(
+#   palette = "YlOrRd",
+#   domain = nh_blkgrps_sf_PM25$PM25_19,
+#   bins = 5, pretty = FALSE
+# )
+
+PopupHouse <- paste0("New Hampshire state House District ",
+                     "<b>",house_districts$REP_DIST,"</b>", " has ",
+                     "<b>",house_districts$BGsLWalk,"</b>",
+                     " <b>Block Groups</b> with high percentages of priority populations in least walkable neighborhoods.", "<br/>",
+                     "<b>MIN Walkability:</b> ", paste0(round(house_districts$NatWalkInd.min,1), " (", house_districts$WalkCat.min),")", "<br/>",
+                     "<b>MEAN Walkability:</b> ", paste0(round(house_districts$NatWalkInd.mean,1), " (", house_districts$WalkCat.mean),")", "<br/>",
+                     "<b>MAX Walkability:</b> ", paste0(round(house_districts$NatWalkInd.max,1), " (", house_districts$WalkCat.max),")")
+
+PopupSenate <- paste0("New Hampshire state Senate District ", "<b>",senate_districts$SEN_DIST,"</b>", " has ", "<b>",senate_districts$BGsLWalk,"</b>", " <b>Block Groups</b> with high percentages of priority populations in least walkable neighborhoods.", "<br/>",
+                     "<b>MIN Walkability:</b> ", paste0(round(senate_districts$NatWalkInd.min,1), " (", senate_districts$WalkCat.min),")", "<br/>",
+                     "<b>MEAN Walkability:</b> ", paste0(round(senate_districts$NatWalkInd.mean,1), " (", senate_districts$WalkCat.mean),")", "<br/>",
+                     "<b>MAX Walkability:</b> ", paste0(round(senate_districts$NatWalkInd.max,1), " (", senate_districts$WalkCat.max),")")
+
+Popup <- paste0(nh_blkgrps_sf_Walk$NAME, "<br/>",
+                "<b>State House District:</b> ", nh_blkgrps_sf_Walk$REP_DIST, "<br/>",
+                  "<b>State Senate District:</b> ", nh_blkgrps_sf_Walk$SEN_DIST, "<br/>",
+                      "<b>Town:</b> ", nh_blkgrps_sf_Walk$TOWN, "<br/>",
+                      "<b>Walkability Score:</b> ", paste0(round(nh_blkgrps_sf_Walk$NatWalkInd,1), " (", nh_blkgrps_sf_Walk$WalkCat,")"), "<br/>",
+         "<b>Walkability percentile:</b> ", round(nh_blkgrps_sf_Walk$Walkpctile,0), "<br/>",
+                      "<b>Priority Populations: </b>", nh_blkgrps_sf_Walk$POPSlabel)
+
+leaflet(width = "100%") %>% 
+  addProviderTiles(providers$Stamen.TonerLite) %>% 
+  addPolygons(data = nh_towns_simple,
+              weight = 0.7,
+              opacity = 1,
+              color = "gray",
+              fillOpacity = 0,
+              label=~NAME, popup=~NAMELSAD, group='muni') %>% 
+  addPolygons(data = house_districts,
+              weight = 2,
+              opacity = 1,
+              color = "blue",
+              dashArray = 3,
+              fillOpacity = 0,
+              # fillColor = "blue",
+              label = ~REP_DIST,
+              popup = PopupHouse,
+              highlight = highlightOptions(
+                weight = 5,
+                color = "#666",
+                dashArray = "",
+                fillOpacity = 0,
+                bringToFront = TRUE),
+              group = "State House Districts") %>% 
+  addPolygons(data = senate_districts,
+              # fillColor = "red",
+              weight = 2,
+              opacity = 1,
+              color = "green",
+              dashArray = 3,
+              fillOpacity = 0,
+              label=~SEN_DIST,
+              popup = PopupSenate,
+              highlight = highlightOptions(
+                weight = 5,
+                color = "#666",
+                dashArray = "",
+                fillOpacity = 0,
+                bringToFront = TRUE),
+              group = "State Senate Districts") %>% 
+  addPolygons(data = nh_blkgrps_sf_Walk, 
+              color = ~palWalk(NatWalkInd),
+              weight = 0.5,
+              opacity = 0.7,
+              # color = "white",
+              dashArray = 3,
+              fillOpacity = 0.7,
+              label=~TOWN, 
+              popup = Popup,
+              highlight = highlightOptions(
+                weight = 5,
+                color = "#666",
+                dashArray = "",
+                fillOpacity = 0.7,
+                bringToFront = TRUE)) %>% 
+  addLegend(title = "Least Walkable Scores<br>for Priority Populations", 
+            pal = palWalk,
+            values = nh_blkgrps_sf_Walk$NatWalkInd,
+            position = "bottomleft",
+            labFormat = function(type, cuts, p) {
+              n = length(cuts)
+              p = paste0(round(p * 100), '%')
+              cuts = paste0(formatC(cuts[-n], big.mark = ",", digits = 1, 
+                                    format = "f"), " - ", 
+                            formatC(cuts[-1], big.mark = ",", digits = 1, 
+                                    format = "f"))
+              }) %>% 
+  setView(lng = -71.5, 44, zoom = 7) %>% 
+  # addMiniMap() %>% 
+  addScaleBar(position = "bottomright") %>% 
+  addSearchFeatures(targetGroups  = 'muni', 
+                    options = searchFeaturesOptions(zoom=14, openPopup=TRUE, hideMarkerOnCollapse=T)) %>% 
+  addLayersControl(
+    overlayGroups = c("State House Districts","State Senate Districts"),
+    options = layersControlOptions(collapsed = TRUE)
+  ) %>% 
+  hideGroup(c("State House Districts","State Senate Districts"))
+```
+
+<br>
+
+<br>
+
+### Cost Burden
+```{r mapTcost, fig.align="left", fig.cap="Map of Census block groups with the highest concentrations of one or more priority populations AND highest transportation cost burden as a percentage of household income."}
+# create color palette
+palTcost <- colorQuantile(
+  palette = "YlOrRd",
+  domain = nh_blkgrps_sf_Tcost$hh7_t,
+  n = 5)
+
+# binpalPM25 <- colorBin(
+#   palette = "YlOrRd",
+#   domain = nh_blkgrps_sf_PM25$PM25_19,
+#   bins = 5, pretty = FALSE
+# )
+
+PopupHouse <- paste0("New Hampshire state House District ", "<b>",house_districts$REP_DIST,"</b>", " has ", "<b>",house_districts$BGs80thTcost,"</b>", " <b>Block Groups</b> with high percentages of priority populations experiencing transportation cost burdens at the 80th percentile - ", Tcost80th,"% of household income - or higher.", "<br/>",
+                     "<b>MIN:</b> ", round(house_districts$hh7_t.min,1),"%", "<br/>",
+                     "<b>MEAN:</b> ", round(house_districts$hh7_t.mean,1),"%", "<br/>",
+                     "<b>MAX:</b> ", round(house_districts$hh7_t.max,1),"%")
+
+PopupSenate <- paste0("New Hampshire state Senate District ", "<b>",senate_districts$SEN_DIST,"</b>", " has ", "<b>",senate_districts$BGs80thTcost,"</b>", " <b>Block Groups</b> with high percentages of priority populations experiencing transportation cost burdens at the 80th percentile - ", Tcost80th,"% of household income - or higher.", "<br/>",
+                     "<b>MIN:</b> ", round(senate_districts$hh7_t.min,1),"%", "<br/>",
+                     "<b>MEAN:</b> ", round(senate_districts$hh7_t.mean,1),"%", "<br/>",
+                     "<b>MAX:</b> ", round(senate_districts$hh7_t.max,1),"%")
+
+Popup <- paste0(nh_blkgrps_sf_Tcost$NAME, "<br/>",
+                "<b>State House District:</b> ", nh_blkgrps_sf_Tcost$REP_DIST, "<br/>",
+                  "<b>State Senate District:</b> ", nh_blkgrps_sf_Tcost$SEN_DIST, "<br/>",
+                      "<b>Town:</b> ", nh_blkgrps_sf_Tcost$TOWN, "<br/>",
+                      "<b>Avg Transport Cost Burden:</b> ", round(nh_blkgrps_sf_Tcost$hh7_t,1), "% of household income", "<br/>",
+                      "<b>Avg Transport Cost Burden percentile: </b>", round(nh_blkgrps_sf_Tcost$Tcostpctile,1), "<br/>",
+                      "<b>Priority Populations: </b>", nh_blkgrps_sf_Tcost$POPSlabel)
+
+leaflet(width = "100%") %>% 
+  addProviderTiles(providers$Stamen.TonerLite) %>% 
+  addPolygons(data = nh_towns_simple,
+              weight = 0.7,
+              opacity = 1,
+              color = "gray",
+              fillOpacity = 0,
+              label=~NAME, popup=~NAMELSAD, group='muni') %>% 
+  addPolygons(data = house_districts,
+              weight = 2,
+              opacity = 1,
+              color = "blue",
+              dashArray = 3,
+              fillOpacity = 0,
+              # fillColor = "blue",
+              label = ~REP_DIST,
+              popup = PopupHouse,
+              highlight = highlightOptions(
+                weight = 5,
+                color = "#666",
+                dashArray = "",
+                fillOpacity = 0,
+                bringToFront = TRUE),
+              group = "State House Districts") %>% 
+  addPolygons(data = senate_districts,
+              # fillColor = "red",
+              weight = 2,
+              opacity = 1,
+              color = "green",
+              dashArray = 3,
+              fillOpacity = 0,
+              label=~SEN_DIST,
+              popup = PopupSenate,
+              highlight = highlightOptions(
+                weight = 5,
+                color = "#666",
+                dashArray = "",
+                fillOpacity = 0,
+                bringToFront = TRUE),
+              group = "State Senate Districts") %>% 
+  addPolygons(data = nh_blkgrps_sf_Tcost, 
+              color = ~palTcost(hh7_t),
+              weight = 0.5,
+              opacity = 0.7,
+              # color = "white",
+              dashArray = 3,
+              fillOpacity = 0.7,
+              label=~TOWN, 
+              popup = Popup,
+              highlight = highlightOptions(
+                weight = 5,
+                color = "#666",
+                dashArray = "",
+                fillOpacity = 0.7,
+                bringToFront = TRUE)) %>% 
+  addLegend(title = "Highest Transport Cost Burdens<br>(% Household Income)<br>for Priority Populations", 
+            pal = palTcost,
+            values = nh_blkgrps_sf_Tcost$hh7_t,
+            position = "bottomleft",
+            labFormat = function(type, cuts, p) {
+              n = length(cuts)
+              p = paste0(round(p * 100), '%')
+              cuts = paste0(formatC(cuts[-n], big.mark = ",", digits = 1, 
+                                    format = "f"), " - ", 
+                            formatC(cuts[-1], big.mark = ",", digits = 1, 
+                                    format = "f"))
+              }) %>% 
+  setView(lng = -71.5, 44, zoom = 7) %>% 
+  # addMiniMap() %>% 
+  addScaleBar(position = "bottomright") %>% 
+  addSearchFeatures(targetGroups  = 'muni', 
+                    options = searchFeaturesOptions(zoom=14, openPopup=TRUE, hideMarkerOnCollapse=T)) %>% 
+  addLayersControl(
+    overlayGroups = c("State House Districts","State Senate Districts"),
+    options = layersControlOptions(collapsed = TRUE)
+  ) %>% 
+  hideGroup(c("State House Districts","State Senate Districts"))
+```
+
+<br>
+
+<br>
+
+### About the maps
+
+These maps show communities (i.e. Census Block Groups) with high percentages of one or more priority population groups (80th percentile for the state) *AND* that experience the highest transportation burdens for specific metrics of transportation access and adequacy. The three transportation metrics highlighted here include: no physical access to bus service (i.e., live 1+ miles from the nearest bus stop), neighborhood walkability scores in the 'least walkable' category (i.e., Walkability score of 5.7 or lower), and transportation cost burdens in the 80th percentile (i.e., `r Tcost80th`% or more of household income). These metrics are three of the eight transportation metrics used to calculate [cumulative Transport burdens](index.html).
+
+Priority populations represent demographic groups that environmental justice policy and research have identified as being especially vulnerable to environmental burdens as a consequence of social or economic disadvantage, physical vulnerability, or historic and persistent discrimination and inequality. These include:
+
+* People of color (i.e., persons who are of Hispanic ethnicity or racially not White)
+* Low income persons (i.e., income less than 200% of the poverty line)
+* Limited English speaking households (i.e., households where no adult speaks English "very well")
+* Adults 25 years or older without a high school diploma
+* Children under the age of 5
+* Adults over the age of 64
+* Individuals under the age of 18
+* Adults 18 years or older with a physical disability
+* Households without access to a car
+
+
+Metrics of transportation access and adequacy:
+
+* Bus Access: A resident is considered to have bus access if they are within one-quarter mile of a bus stop. This geographic definition of access is consistent with FTA Circular 4702.1B Title VI Requirements and Guidelines for Federal Transit Administration Recipients, Chapter IV-14.  For the purposes of this analysis, populations living more than 1 mile from the nearest bus stop are considered to have no reasonable access to bus service. Physical access does not necessarily imply adequate accessibility, since it is not clear if the nearest transit stops offer service to desired destinations. Lack of basic physical access to transit offers a simple measure of areas and groups of people who lack access to even the most basic benefits of public transit. 
+
+* Walkability: More walkable communities are positively associated with a variety of quality of life and public health benefits. Conversely, less walkable communities are associated with a range of public health challenges, including higher rates of cardiovascular disease and diabetes. The [National Walkability Index](https://www.epa.gov/smartgrowth/smart-location-mapping#walkability) is a nationwide geographic data resource produced by the U.S. Environmental Protection Agency that ranks Census Block Groups according to their relative walkability.  Walkability was modeled based on characteristics of the built environment that influence the likelihood of walking being used as a mode of travel.
+
+* Transportation Cost Burden: Transportation is the second-largest expenditure category for American households, approximately 16% of annual expenditures on average between 2015 and 2018.  Only housing costs (~32%) exceed those of transportation. Transportation costs can be significant economic burdens for moderate and lower income households. For many working-class and rural households, transportation costs exceed housing costs. Transportation cost burden is the percentage of household income for a moderate income household that would be needed to cover transportation costs. These estimated costs are derived from the [Location Affordability Index Model Version 3 (LAIM3)](https://www.hudexchange.info/programs/location-affordability-index/about/) developed by the U.S. Department of Housing and Urban Development (HUD) and Department of Transportation. 
+
+<br>
+
+<br>
+
+## Population-weighted transportation access and burdens for priority populations {.tabset}
+
+### Bus Access
+
+```{r graphBusAccess, fig.align="center", fig.cap="Percentage of population groups within 1/4 mile (400 meters) of a bus stop across New Hampshire."}
+nh_transitAccessPops_df %>% 
+  arrange(PctBus) %>% 
+  mutate(PctBus = round(PctBus,1), 
+         Status = case_when(
+           Group == "Total Pop" ~ "State avg",
+           PctBus < nh_transitAccessPops_df[1,4] ~ "Below state avg",
+           PctBus > nh_transitAccessPops_df[1,4] ~ "Above state avg"),
+         Group = recode(Group, "Minority" = "People of Color",
+                        "No HS Dip" = "No HS Diploma")) %>% 
+  mutate(Group = factor(Group) %>% fct_reorder(PctBus, .desc = FALSE)) %>% 
+  mutate(group_index = as.numeric(Group)) %>% 
+  hchart(., "bar", hcaes(x = group_index, y = PctBus, 
+                         group = Status, name = Group), 
+                         color = c("#7CB5EC", "#F7A35C", "#000000"),
+         pointWidth = 15) %>% 
+  hc_yAxis(title = list(text = "Percent of population with access to bus stops"),
+           labels = list(format = "{value}%")) %>% 
+  hc_xAxis(title = NULL, type = "category", labels = list(step = 1)) %>% 
+  hc_tooltip(pointFormat = "{series.name}: {point.y}%") %>% 
+  hc_title(text = "New Hampshire Populations within Walking Distance (400m) of Bus Stops", 
+           useHTML = TRUE)
+```
+
+<br>
+
+<br>
+
+### Walkability
+
+```{r graphWalk, fig.align="center", fig.cap="Population-weighted average walkability index scores for groups across New Hampshire."}
+popAvgWalk <- nh_wAvgWalkability_df %>% 
+  filter(Group == "Total Pop") %>% 
+  select(wNatWalkIndex) %>% 
+  pull()
+
+nh_wAvgWalkability_df %>% 
+  arrange(wNatWalkIndex) %>% 
+  mutate(wNatWalkIndex = round(wNatWalkIndex,2), 
+         Status = case_when(
+           Group == "Total Pop" ~ "State avg",
+           wNatWalkIndex < popAvgWalk ~ "Below state avg",
+           wNatWalkIndex > popAvgWalk ~ "Above state avg"),
+         Group = recode(Group, "Minority" = "People of Color",
+                        "No HS Dip" = "No HS Diploma")) %>% 
+  mutate(Group = factor(Group) %>% fct_reorder(wNatWalkIndex, .desc = FALSE)) %>% 
+  mutate(group_index = as.numeric(Group)) %>% 
+  hchart(., "bar", hcaes(x = group_index, y = wNatWalkIndex, 
+                         group = Status, name = Group), 
+                         color = c("#7CB5EC", "#F7A35C", "#000000"),
+         pointWidth = 15) %>% 
+  hc_yAxis(title = list(text = "Walkability Index")) %>% 
+  hc_xAxis(title = NULL, type = "category", labels = list(step = 1)) %>% 
+  hc_tooltip(pointFormat = "{series.name}: {point.y}") %>% 
+  hc_title(text = "Population−Weighted Walkability Index", 
+           useHTML = TRUE)
+```
+
+<br>
+
+<br>
+
+### Cost Burden
+
+```{r graphTcost, fig.align="center", fig.cap="Population-weighted average transportation cost burden as a percentage of household income for groups across New Hampshire."}
+# extract total pop value
+popAvgTcost <- lai_nh_df %>% 
+  filter(Group == "Total Pop") %>% 
+  select(wTBurden) %>% 
+  pull()
+
+lai_nh_df %>% 
+  as.data.frame() %>% 
+  arrange(desc(wTBurden)) %>% 
+  mutate(wTBurden = round(wTBurden,2),
+         Status = case_when(
+           Group == "Total Pop" ~ "State avg",
+           wTBurden < popAvgTcost ~ "Below state avg",
+           wTBurden > popAvgTcost ~ "Above state avg"),
+         Group = recode(Group, "Minority" = "People of Color",
+                        "No HS Dip" = "No HS Diploma")) %>% 
+  mutate(Group = factor(Group) %>% fct_reorder(wTBurden, .desc = TRUE)) %>% 
+  mutate(group_index = as.numeric(Group)) %>% 
+  hchart(., "bar", hcaes(x = group_index, y = wTBurden, 
+                         group = Status, name = Group), 
+                         color = c("#F7A35C", "#7CB5EC", "#000000"),
+         pointWidth = 15) %>% 
+  hc_yAxis(title = list(text = "Percent of household income"),
+           labels = list(format = "{value}%")) %>% 
+  hc_xAxis(title = NULL, type = "category", labels = list(step = 1)) %>% 
+  hc_tooltip(pointFormat = "{series.name}: {point.y}%") %>% 
+  hc_title(text = "Population−Weighted Transportation Cost Burden", 
+           useHTML = TRUE)
+```
+
+<br>
+
+<br>
+
+### About the graphs
+
+These graphs show population-weighted access and burden by group for the following transportation metrics: 
+
+* Bus Access: A resident is considered to have bus access if they are within one-quarter mile of a bus stop. This geographic definition of access is consistent with FTA Circular 4702.1B Title VI Requirements and Guidelines for Federal Transit Administration Recipients, Chapter IV-14.  Physical access does not necessarily imply adequate accessibility, since it is not clear if the nearest transit stops offer service to desired destinations. Lack of basic physical access to transit offers a simple measure of areas and groups of people who lack access to even the most basic benefits of public transit. 
+
+* Walkability: More walkable communities are positively associated with a variety of quality of life and public health benefits. Conversely, less walkable communities are associated with a range of public health challenges, including higher rates of cardiovascular disease and diabetes. The [National Walkability Index](https://www.epa.gov/smartgrowth/smart-location-mapping#walkability) is a nationwide geographic data resource produced by the U.S. Environmental Protection Agency that ranks Census Block Groups according to their relative walkability.  Walkability was modeled based on characteristics of the built environment that influence the likelihood of walking being used as a mode of travel.
+
+* Transportation Cost Burden: Transportation is the second-largest expenditure category for American households, approximately 16% of annual expenditures on average between 2015 and 2018.  Only housing costs (~32%) exceed those of transportation. Transportation costs can be significant economic burdens for moderate and lower income households. For many working-class and rural households, transportation costs exceed housing costs. Transportation cost burden is the percentage of household income for a moderate income household that would be needed to cover transportation costs. These estimated costs are derived from the [Location Affordability Index Model Version 3 (LAIM3)](https://www.hudexchange.info/programs/location-affordability-index/about/) developed by the U.S. Department of Housing and Urban Development (HUD) and Department of Transportation. 
+
+For example, adults over the age of 64 (i.e., 'Over 64') in the state reside in Census block groups that experience population-weighted transportation cost burdens of over `r round(lai_nh_df %>% filter(Group == "Over 64") %>% select(wTBurden) %>% pull(),1)`% of annual household income. This is almost twice the national average of 16%. 
+
+<br>
+
+<br>
+
+## Transportation Burdens by Jurisdiction {.tabset}
+
+### By municipality
+
+```{r townTable, fig.align="center"}
+# calculate bus access pops per municipality
+busAccesbyTown <- nh_busBuff400m_sf %>% 
+  transmute(NewPop = NewPop, OldArea = as.numeric(st_area(.))) %>% 
+  st_intersection(st_transform(nh_towns, st_crs(nh_busBuff400m_sf))) %>% 
+  mutate(NewArea = as.numeric(st_area(.)),
+         Proportion = NewArea/OldArea,
+         BusPop = as.integer(NewPop*Proportion)) %>% 
+  st_drop_geometry() %>% 
+  group_by(GEOID) %>% 
+  summarize(BusPop = sum(BusPop))
+
+# download town pops
+town_pops <- get_acs(geography = "county subdivision", survey = "acs5",
+                     variables = c(totalpop = "B03002_001"),
+                     state = "NH", output = "wide", year = 2018) %>% 
+  select(GEOID, totalpopE)
+
+# # grab municipal boundaries
+# nh_towns_sf <- county_subdivisions(state = "NH", cb = TRUE) %>% 
+#   st_transform(., crs = 26986)
+
+# create df with town names from tigris and pops from tidycensus
+town_busAccess_pct <- town_pops %>% 
+  # as.data.frame() %>% 
+  # left_join(., town_pops, by = "GEOID") %>% 
+  # select(NAME, totalpopE) %>% 
+  left_join(busAccesbyTown, ., by = "GEOID") %>% 
+  mutate(PctBusAccess = BusPop/totalpopE*100)
+
+nh_towns %>% 
+  as.data.frame() %>% 
+  filter(NAME != "County subdivisions not defined") %>% 
+  left_join(., town_busAccess_pct, by = "GEOID") %>% 
+  transmute(`City/Town` = NAMELSAD,
+            `Pct Bus Access` = PctBusAccess/100,
+            `Avg Walkability` = NatWalkInd.mean,
+            `Avg Transport Cost Burden` = hh7_t.mean/100) %>% 
+  replace_na(list(`Pct Bus Access` = 0)) %>% 
+  arrange(`City/Town`) %>% 
+  datatable(., rownames = FALSE, options = list(pageLength = 10)) %>% 
+  formatRound(., columns = 3, digits = 1, mark = ",") %>% 
+  formatPercentage(., columns = c(2,4), digits = 1)
+```
+
+<!-- > Number of Census block groups with three or more cumualtive environmental burdens and high concentrations of populations of concern -->
+
+
+### By state house district
+
+```{r houseTable, fig.align="center"}
+# calculate bus access pops per district
+busAccesbyHouse <- nh_busBuff400m_sf %>% 
+  transmute(NewPop = NewPop, OldArea = as.numeric(st_area(.))) %>% 
+  st_intersection(
+    st_make_valid(
+    st_transform(house_districts,st_crs(nh_busBuff400m_sf))
+    )
+    ) %>% 
+  mutate(NewArea = as.numeric(st_area(.)),
+         Proportion = NewArea/OldArea,
+         BusPop = as.integer(NewPop*Proportion)) %>% 
+  as.data.frame() %>% 
+  group_by(REP_DIST) %>% 
+  summarize(BusPop = sum(BusPop))
+
+# create pop totals for each district
+house_names_pops <- nh_blkgrps_sf %>% 
+  st_transform(.,st_crs(nh_busBuff400m_sf)) %>% 
+  select(totalpopE) %>% 
+  mutate(OldArea = as.numeric(st_area(.))) %>% 
+    st_intersection(
+      st_make_valid(
+        st_transform(house_districts,st_crs(nh_busBuff400m_sf))
+        )
+      ) %>% 
+  mutate(NewArea = as.numeric(st_area(.)),
+         Proportion = NewArea/OldArea,
+         NewPop = totalpopE*Proportion) %>% 
+  as.data.frame() %>% 
+  group_by(REP_DIST) %>% 
+  summarize(totalpopE = sum(NewPop))
+
+# calculate pct of pop with bus access per district
+house_busAccess_pct <- busAccesbyHouse %>% 
+  left_join(., house_names_pops, by = "REP_DIST") %>% 
+  mutate(PctBusAccess = BusPop/totalpopE*100)
+
+# make table
+house_districts %>% 
+  as.data.frame() %>% 
+  left_join(., house_busAccess_pct, by = "REP_DIST") %>% 
+  transmute(`House District` = REP_DIST,
+            `Pct Bus Access` = PctBusAccess/100,
+            `Avg Walkability` = NatWalkInd.mean,
+            `Avg Transport Cost Burden` = hh7_t.mean/100) %>% 
+  replace_na(list(`Pct Bus Access` = 0)) %>% 
+  mutate(across(starts_with("Pct"), ~if_else(. > 1, 1, .))) %>%
+  arrange(`House District`) %>% 
+  datatable(., rownames = FALSE, options = list(pageLength = 10)) %>% 
+  formatRound(., columns = 3, digits = 1, mark = ",") %>% 
+  formatPercentage(., columns = c(2,4), digits = 1)
+```
+
+
+### By state senate district
+
+```{r senateTable, fig.align="center"}
+# calculate bus access pops per district
+busAccesbySenate <- nh_busBuff400m_sf %>% 
+  transmute(NewPop = NewPop, OldArea = as.numeric(st_area(.))) %>% 
+  st_intersection(
+    st_make_valid(
+    st_transform(senate_districts,st_crs(nh_busBuff400m_sf))
+    )
+    ) %>% 
+  mutate(NewArea = as.numeric(st_area(.)),
+         Proportion = NewArea/OldArea,
+         BusPop = as.integer(NewPop*Proportion)) %>% 
+  as.data.frame() %>% 
+  group_by(SEN_DIST) %>% 
+  summarize(BusPop = sum(BusPop))
+
+# create pop totals for each district
+senate_names_pops <- nh_blkgrps_sf %>% 
+  st_transform(.,st_crs(nh_busBuff400m_sf)) %>% 
+  select(totalpopE) %>% 
+  mutate(OldArea = as.numeric(st_area(.))) %>% 
+    st_intersection(
+      st_make_valid(
+        st_transform(senate_districts,st_crs(nh_busBuff400m_sf))
+        )
+      ) %>% 
+  mutate(NewArea = as.numeric(st_area(.)),
+         Proportion = NewArea/OldArea,
+         NewPop = totalpopE*Proportion) %>% 
+  as.data.frame() %>% 
+  group_by(SEN_DIST) %>% 
+  summarize(totalpopE = sum(NewPop))
+
+# calculate pct of pop with bus access per district
+senate_busAccess_pct <- busAccesbySenate %>% 
+  left_join(., senate_names_pops, by = "SEN_DIST") %>% 
+  mutate(PctBusAccess = BusPop/totalpopE*100)
+
+# make table
+senate_districts %>% 
+  as.data.frame() %>% 
+  left_join(., senate_busAccess_pct, by = "SEN_DIST") %>% 
+  transmute(`Senate District` = SEN_DIST,
+            `Pct Bus Access` = PctBusAccess/100,
+            `Avg Walkability` = NatWalkInd.mean,
+            `Avg Transport Cost Burden` = hh7_t.mean/100) %>% 
+  replace_na(list(`Pct Bus Access` = 0)) %>% 
+  arrange(`Senate District`) %>% 
+  datatable(., rownames = FALSE, options = list(pageLength = 10)) %>% 
+  formatRound(., columns = 3, digits = 1, mark = ",") %>% 
+  formatPercentage(., columns = c(2,4), digits = 1)
+```
+
+
+### About the tables
+
+These tables show four separate measures of transport accessibility or adequacy:
+
+* Pct Bus Access. Average percentage of the general population within walking distance of a bus stop for Census block groups in that jurisdiction. 
+
+* Avg Walkability. The average walkability score, according to the EPA's National Walkability Index, of Census block groups in the jurisdiction. Scores range from 1 to 20, with higher scores indicating more walkable neighborhoods. Scores above 10.5 are considered "above average walkable." Scores below 5.7 are considered "least walkable."
+
+* Avg Transport Cost Burden. Average percentage of household income for a moderate income household that would be needed to cover transportation costs. Nationally, households spend approximately 16% of their income on transportation.
+
+<br>
+
+<br>
+
+<br>
+
+<br>
+
+<br>
+
+<br>
