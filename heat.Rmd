@@ -26,55 +26,53 @@ library(geojsonio)
 
 ```{r data, include=FALSE, cache=TRUE}
 # # Read in LST data. Whole block group units.
-# load("../DATA/LST/nh_blkgrpLST_sf.rds")
+# load("../DATA/LST/me_blkgrpLST_sf.rds")
 # # reduce unnecessary variables to speed up processing
-# rm(nh_rural_sf, nh_urban_sf)
-# nh_blkgrpLST_sf <- nh_blkgrpLST_sf %>% 
+# rm(me_rural_sf, me_urban_sf)
+# me_blkgrpLST_sf <- me_blkgrpLST_sf %>% 
 #   select(!(OBJECTID_15:Shape_Area))
 
-nh_blkgrpLST_sf <- readRDS(file = "../DATA/nh_blkgrps_sf_CUM.Rds")
+me_blkgrpLST_sf <- readRDS(file = "../DATA/me_blkgrps_sf_CUM.Rds")
 
 #create layer of municipalities
-nh_towns <- county_subdivisions("NH") %>% 
+me_towns <- county_subdivisions("ME") %>% 
   filter(NAME != "County subdivisions not defined") %>%  
   st_transform(., crs = 4326) %>% 
   select(NAME,NAMELSAD)
 
 # Assign municipality names to block groups
-nh_blkgrpLST_sf <- county_subdivisions("NH") %>% 
-  st_transform(., crs = st_crs(nh_blkgrpLST_sf)) %>% 
+me_blkgrpLST_sf <- county_subdivisions("ME") %>% 
+  st_transform(., crs = st_crs(me_blkgrpLST_sf)) %>% 
   transmute(TOWN = NAMELSAD) %>% 
-  st_join(nh_blkgrpLST_sf, ., largest = TRUE) %>% 
-  mutate(NAME = str_remove_all(NAME, ", New Hampshire")) %>% 
+  st_join(me_blkgrpLST_sf, ., largest = TRUE) %>% 
+  mutate(NAME = str_remove_all(NAME, ", Maine")) %>% 
   st_transform(., crs = 4326)
 
 # create layer of state house districts
-house_districts <- geojson_read("https://opendata.arcgis.com/datasets/f264be37ee714132b268924c44b91803_2.geojson", what = "sp") %>% 
-  st_as_sf(.) %>% 
-  transmute(REP_DIST = NHHouse201) %>%
-  st_transform(., crs = 4326) %>% 
+house_districts <- st_read("../DATA/shapefiles/Maine_House_Districts_2013_GeoLibrary-shp", "Maine_House_Districts_2013_GeoLibrary") %>%
+  transmute(REP_DIST = HD2013) %>% 
+  st_transform(., crs = 4326) %>%
   st_make_valid()
 
 # create layer of state senate districts
-senate_districts <- geojson_read("https://opendata.arcgis.com/datasets/df824f020357423b9f23384f80d9e2d1_4.geojson", what = "sp") %>% 
-  st_as_sf(.) %>% 
-  transmute(SEN_DIST = Senate2012) %>% 
-  st_transform(., crs = 4326) %>% 
+senate_districts <- st_read("../DATA/shapefiles/Maine_State_Senate_Districts_2013_GeoLibrary-shp", "Maine_State_Senate_Districts_2013_GeoLibrary") %>%
+  transmute(SEN_DIST = SD2013) %>% 
+  st_transform(., crs = 4326) %>%
   st_make_valid()
 
 # Assign state house district names to block groups
-nh_blkgrpLST_sf <- house_districts %>% 
+me_blkgrpLST_sf <- house_districts %>% 
   select(REP_DIST) %>% 
-  st_join(nh_blkgrpLST_sf, ., largest = TRUE)
+  st_join(me_blkgrpLST_sf, ., largest = TRUE)
 
 # Assign state senate district names to block groups
-nh_blkgrpLST_sf <- senate_districts %>% 
+me_blkgrpLST_sf <- senate_districts %>% 
   select(SEN_DIST) %>% 
-  st_join(nh_blkgrpLST_sf, ., largest = TRUE)
+  st_join(me_blkgrpLST_sf, ., largest = TRUE)
 
 
 # Create labeling variables to identify pops of a concern in a given block group that contributed to cumulative burden score
-nh_blkgrpLST_sf <- nh_blkgrpLST_sf %>% 
+me_blkgrpLST_sf <- me_blkgrpLST_sf %>% 
   mutate(Minority80th = if_else(percent_rank(minority_pctE) >= 0.8, "People of Color","NA"),
     Under5_80th = if_else(percent_rank(pct_under5E) >= 0.8, "Under 5", "NA"),
     Under18_80th = if_else(percent_rank(pct_under18E) >= 0.8, "Under 18", "NA"),
@@ -102,7 +100,7 @@ nh_blkgrpLST_sf <- nh_blkgrpLST_sf %>%
   # filter(POPSlabel != "No Pops of Concern")
 
 # create summary stats of LST values by municipality
-# muniLST <- nh_blkgrpLST_sf %>%
+# muniLST <- me_blkgrpLST_sf %>%
 #   as.data.frame() %>% 
 #   select(TOWN, meanAvgLST, UHI24avg, meanNightLST) %>% 
 #   group_by(TOWN) %>% 
@@ -114,10 +112,10 @@ nh_blkgrpLST_sf <- nh_blkgrpLST_sf %>%
 #                 ~percent_rank(.x)*100,
 #                 .names = "pctrank_{.col}"))
 
-muniLST <- nh_blkgrpLST_sf %>%
+muniLST <- me_blkgrpLST_sf %>%
   select(TOWN, meanAvgLST, UHI24avg, meanNightLST) %>% 
   mutate(OldArea = as.numeric(st_area(.))) %>% 
-  st_intersection(nh_towns) %>% 
+  st_intersection(me_towns) %>% 
   mutate(NewArea = as.numeric(st_area(.)),
          Prop = NewArea/OldArea) %>% 
   as.data.frame() %>% 
@@ -131,7 +129,7 @@ muniLST <- nh_blkgrpLST_sf %>%
   rename(TOWN = NAMELSAD)
 
 # create summary of LST values by house district
-houseLST <- nh_blkgrpLST_sf %>%
+houseLST <- me_blkgrpLST_sf %>%
   as.data.frame() %>% 
   select(REP_DIST, meanAvgLST, UHI24avg, meanNightLST) %>% 
   group_by(REP_DIST) %>% 
@@ -145,7 +143,7 @@ houseLST <- nh_blkgrpLST_sf %>%
   drop_na()
 
 # create summary of LST values by senate district
-senateLST <- nh_blkgrpLST_sf %>%
+senateLST <- me_blkgrpLST_sf %>%
   as.data.frame() %>% 
   select(SEN_DIST, meanAvgLST, UHI24avg, meanNightLST) %>% 
   group_by(SEN_DIST) %>% 
@@ -159,64 +157,64 @@ senateLST <- nh_blkgrpLST_sf %>%
   drop_na()
 
 # Create counts of block groups at 80th percentile Day-Night LST by jurisdiction
-muniDayNight_80th <- nh_blkgrpLST_sf %>% 
+muniDayNight_80th <- me_blkgrpLST_sf %>% 
   as.data.frame() %>% 
   filter(percent_rank(meanAvgLST) >= 0.8 & POPSlabel != "No Pops of Concern") %>%
   group_by(TOWN) %>% 
   summarize(BGs80thDayNight = n())
 
-houseDayNight_80th <- nh_blkgrpLST_sf %>% 
+houseDayNight_80th <- me_blkgrpLST_sf %>% 
   as.data.frame() %>% 
   filter(percent_rank(meanAvgLST) >= 0.8 & POPSlabel != "No Pops of Concern") %>%
   group_by(REP_DIST) %>% 
   summarize(BGs80thDayNight = n())
 
-senateDayNight_80th <- nh_blkgrpLST_sf %>% 
+senateDayNight_80th <- me_blkgrpLST_sf %>% 
   as.data.frame() %>% 
   filter(percent_rank(meanAvgLST) >= 0.8 & POPSlabel != "No Pops of Concern") %>%
   group_by(SEN_DIST) %>% 
   summarize(BGs80thDayNight = n())
 
 # Create counts of block groups at 80th percentile UHI24h by jurisdiction
-muniUHI24h_80th <- nh_blkgrpLST_sf %>% 
+muniUHI24h_80th <- me_blkgrpLST_sf %>% 
   as.data.frame() %>% 
   filter(percent_rank(UHI24avg) >= 0.8 & POPSlabel != "No Pops of Concern") %>% 
   group_by(TOWN) %>% 
   summarize(BGs80thUHI24h = n())
 
-houseUHI24h_80th <- nh_blkgrpLST_sf %>% 
+houseUHI24h_80th <- me_blkgrpLST_sf %>% 
   as.data.frame() %>% 
   filter(percent_rank(UHI24avg) >= 0.8 & POPSlabel != "No Pops of Concern") %>% 
   group_by(REP_DIST) %>% 
   summarize(BGs80thUHI24h = n())
 
-senateUHI24h_80th <- nh_blkgrpLST_sf %>% 
+senateUHI24h_80th <- me_blkgrpLST_sf %>% 
   as.data.frame() %>% 
   filter(percent_rank(UHI24avg) >= 0.8 & POPSlabel != "No Pops of Concern") %>% 
   group_by(SEN_DIST) %>% 
   summarize(BGs80thUHI24h = n())
 
 # Create counts of block groups at 80th percentile Night by jurisdiction
-muniNight_80th <- nh_blkgrpLST_sf %>% 
+muniNight_80th <- me_blkgrpLST_sf %>% 
   as.data.frame() %>% 
   filter(percent_rank(meanNightLST) >= 0.8 & POPSlabel != "No Pops of Concern") %>% 
   group_by(TOWN) %>% 
   summarize(BGs80thNight = n())
 
-houseNight_80th <- nh_blkgrpLST_sf %>% 
+houseNight_80th <- me_blkgrpLST_sf %>% 
   as.data.frame() %>% 
   filter(percent_rank(meanNightLST) >= 0.8 & POPSlabel != "No Pops of Concern") %>% 
   group_by(REP_DIST) %>% 
   summarize(BGs80thNight = n())
 
-senateNight_80th <- nh_blkgrpLST_sf %>% 
+senateNight_80th <- me_blkgrpLST_sf %>% 
   as.data.frame() %>% 
   filter(percent_rank(meanNightLST) >= 0.8 & POPSlabel != "No Pops of Concern") %>% 
   group_by(SEN_DIST) %>% 
   summarize(BGs80thNight = n())
 
 # join stats to jurisdiction layers
-nh_towns <- nh_towns %>% 
+me_towns <- me_towns %>% 
   left_join(., muniLST, by = c("NAMELSAD" = "TOWN")) %>% 
   left_join(., muniDayNight_80th, by = c("NAMELSAD" = "TOWN")) %>% 
   left_join(., muniUHI24h_80th, by = c("NAMELSAD" = "TOWN")) %>% 
@@ -241,22 +239,22 @@ senate_districts <- senate_districts %>%
   replace_na(list(BGs80thDayNight = 0, BGs80thUHI24h = 0, BGs80thNight = 0)) %>% 
   ms_simplify(., keep = 0.1, keep_shapes = TRUE)
 
-# create layer of nh_blkgrpLST_sf for 80th percentile
-nh_blkgrps_sf_DayNight <- nh_blkgrpLST_sf %>% 
+# create layer of me_blkgrpLST_sf for 80th percentile
+me_blkgrps_sf_DayNight <- me_blkgrpLST_sf %>% 
   filter(percent_rank(meanAvgLST) >= 0.8 & 
            POPSlabel != "No Pops of Concern") %>% 
   select(NAME, REP_DIST, SEN_DIST, TOWN, POPSlabel, 
          meanAvgLST, meanAvgLSTpctile) %>% 
   ms_simplify(., keep = 0.1, keep_shapes = TRUE)
 
-nh_blkgrps_sf_UHI24h <- nh_blkgrpLST_sf %>% 
+me_blkgrps_sf_UHI24h <- me_blkgrpLST_sf %>% 
   filter(percent_rank(UHI24avg) >= 0.8 & 
            POPSlabel != "No Pops of Concern") %>% 
   select(NAME, REP_DIST, SEN_DIST, TOWN, POPSlabel, 
          UHI24avg, UHI24avgpctile) %>% 
   ms_simplify(., keep = 0.1, keep_shapes = TRUE)
 
-nh_blkgrps_sf_Night <- nh_blkgrpLST_sf %>% 
+me_blkgrps_sf_Night <- me_blkgrpLST_sf %>% 
   filter(percent_rank(meanNightLST) >= 0.8 & 
            POPSlabel != "No Pops of Concern") %>% 
   select(NAME, REP_DIST, SEN_DIST, TOWN, POPSlabel, 
@@ -264,7 +262,7 @@ nh_blkgrps_sf_Night <- nh_blkgrpLST_sf %>%
   ms_simplify(., keep = 0.1, keep_shapes = TRUE)
 
 # create tables of affected populations for graphs
-LST24hrPop <- nh_blkgrpLST_sf %>% 
+LST24hrPop <- me_blkgrpLST_sf %>% 
   as.data.frame() %>% 
   dplyr::select(totalpopE,
                 minorityE,
@@ -292,7 +290,7 @@ LST24hrPop <- nh_blkgrpLST_sf %>%
     Group == "over64E" ~ "Over 64"),
     LST24hrwMean = round(LST24hrwMean,1))
 
-UHI24hrPop <- nh_blkgrpLST_sf %>% 
+UHI24hrPop <- me_blkgrpLST_sf %>% 
   as.data.frame() %>% 
   dplyr::select(totalpopE,
                 minorityE,
@@ -320,7 +318,7 @@ UHI24hrPop <- nh_blkgrpLST_sf %>%
     Group == "over64E" ~ "Over 64"),
     UHI24hrwMean = round(UHI24hrwMean,1))
 
-LSTNightPop <- nh_blkgrpLST_sf %>% 
+LSTNightPop <- me_blkgrpLST_sf %>% 
   as.data.frame() %>% 
   dplyr::select(totalpopE,
                 minorityE,
@@ -349,14 +347,14 @@ LSTNightPop <- nh_blkgrpLST_sf %>%
     LSTNightwMean = round(LSTNightwMean,1))
 
 # clean up
-rm(list = ls(pattern = paste("muni", "_80th", "houseN", "senateN", "houseL", "senateL", "houseU", "senateU", "houseD", "senateD", "nh_blkgrpLST_sf$", sep = "|")))
+rm(list = ls(pattern = paste("muni", "_80th", "houseN", "senateN", "houseL", "senateL", "houseU", "senateU", "houseD", "senateD", "me_blkgrpLST_sf$", sep = "|")))
 ```
 
 Heat is the leading cause of weather-related death in the U.S. Warmer air temperatures can also exacerbate air pollution, especially ground-level ozone. As the climate warms, heat presents both a direct and indirect threat to health and quality of life. 
 
-Population centers experience the highest daytime temperatures. This is especially the case in the southeast corner of New Hampshire. Higher nighttime temperatures are more widespread across the state. Limited English speaking households and people of color are more likely to experience the highest daytime and nighttime temperatures.
+Areas in and around I-95 as far north as Houlton experience the highest daytime temperatures. Higher nighttime temperatures are more widespread across the state and include much of the southern coastline. Limited English speaking households and people of color are more likely to experience the highest daytime and nighttime temperatures.
 
-These interactive figures identify communities across New Hampshire that are most overburdened and most vulnerable to three measures of ambient temperature: Day-Night average land surface temperatures (LST), the Urban Heat Island effect, and elevated nighttime LST.
+These interactive figures identify communities across Maine that are most overburdened and most vulnerable to three measures of ambient temperature: Day-Night average land surface temperatures (LST), the Urban Heat Island effect, and elevated nighttime LST.
 
 <br>
 
@@ -366,47 +364,47 @@ These interactive figures identify communities across New Hampshire that are mos
 ```{r mapDayNight, fig.align="left", fig.cap="Map of Census block groups with the highest concentrations of one or more priority populations AND highest day-night average land surface temperatures (LST)."}
 # create simplified towns layer for faster mapping
 # download state outline
-nh_state <- states(cb = TRUE) %>% 
-  filter(NAME == "New Hampshire")
+me_state <- states(cb = TRUE) %>% 
+  filter(NAME == "Maine")
 # filter out extra polygons, clip out boundaries from water, simplify
-nh_towns_simple <- nh_towns %>% 
+me_towns_simple <- me_towns %>% 
   filter(NAME != "County subdivisions not defined") %>% 
-  ms_clip(., nh_state) %>% 
+  ms_clip(., me_state) %>% 
   ms_simplify(., keep = 0.1, keep_shapes = TRUE)
 
 # create color palette
 pal <- colorQuantile(
   palette = "YlOrRd",
-  domain = nh_blkgrps_sf_DayNight$meanAvgLST,
+  domain = me_blkgrps_sf_DayNight$meanAvgLST,
   n = 5)
 
 # binpal <- colorBin(
 #   palette = "YlOrRd",
-#   domain = nh_blkgrps_sf_DayNight$meanAvgLST,
+#   domain = me_blkgrps_sf_DayNight$meanAvgLST,
 #   bins = 5, pretty = FALSE
 # )
 
-PopupHouse <- paste0("New Hampshire state House District ", "<b>",house_districts$REP_DIST,"</b>", " has ", "<b>",house_districts$BGs80thDayNight,"</b>", " <b>Block Groups</b> with high percentages of priority populations experiencing Day-Night average land surface temperatures at the 80th percentile - ", round(min(nh_blkgrps_sf_DayNight$meanAvgLST),1),"° - or higher.", "<br/>",
+PopupHouse <- paste0("Maine state House District ", "<b>",house_districts$REP_DIST,"</b>", " has ", "<b>",house_districts$BGs80thDayNight,"</b>", " <b>Block Groups</b> with high percentages of priority populations experiencing Day-Night average land surface temperatures at the 80th percentile - ", round(min(me_blkgrps_sf_DayNight$meanAvgLST),1),"° - or higher.", "<br/>",
                      "<b>MIN Day-Night Avg Temp (°F):</b> ", round(house_districts$meanAvgLST.min,1),"°", "<br/>",
                      "<b>MEAN Day-Night Avg Temp (°F):</b> ", round(house_districts$meanAvgLST.mean,1),"°", "<br/>",
                      "<b>MAX Day-Night Avg Temp (°F):</b> ", round(house_districts$meanAvgLST.max,1),"°")
 
-PopupSenate <- paste0("New Hampshire state Senate District ", "<b>",senate_districts$SEN_DIST,"</b>", " has ", "<b>",senate_districts$BGs80thDayNight,"</b>", " <b>Block Groups</b> with high percentages of priority populations experiencing Day-Night average land surface temperatures at the 80th percentile - ", round(min(nh_blkgrps_sf_DayNight$meanAvgLST),1),"° - or higher.", "<br/>",
+PopupSenate <- paste0("Maine state Senate District ", "<b>",senate_districts$SEN_DIST,"</b>", " has ", "<b>",senate_districts$BGs80thDayNight,"</b>", " <b>Block Groups</b> with high percentages of priority populations experiencing Day-Night average land surface temperatures at the 80th percentile - ", round(min(me_blkgrps_sf_DayNight$meanAvgLST),1),"° - or higher.", "<br/>",
                      "<b>MIN Day-Night Avg Temp (°F):</b> ", round(senate_districts$meanAvgLST.min,1),"°", "<br/>",
                      "<b>MEAN Day-Night Avg Temp (°F):</b> ", round(senate_districts$meanAvgLST.mean,1),"°", "<br/>",
                      "<b>MAX Day-Night Avg Temp (°F):</b> ", round(senate_districts$meanAvgLST.max,1),"°")
 
-Popup <- paste0(nh_blkgrps_sf_DayNight$NAME, "<br/>",
-                "<b>State House District:</b> ", nh_blkgrps_sf_DayNight$REP_DIST, "<br/>",
-                  "<b>State Senate District:</b> ", nh_blkgrps_sf_DayNight$SEN_DIST, "<br/>",
-                      "<b>Town:</b> ", nh_blkgrps_sf_DayNight$TOWN, "<br/>",
-                      "<b>Day-Night Avg Temp (°F):</b> ", round(nh_blkgrps_sf_DayNight$meanAvgLST,1),"°", "<br/>",
-         "<b>Day-Night Avg Temp percentile:</b> ", round(nh_blkgrps_sf_DayNight$meanAvgLSTpctile*100,0), "<br/>",
-                      "<b>Priority Populations: </b>", nh_blkgrps_sf_DayNight$POPSlabel)
+Popup <- paste0(me_blkgrps_sf_DayNight$NAME, "<br/>",
+                "<b>State House District:</b> ", me_blkgrps_sf_DayNight$REP_DIST, "<br/>",
+                  "<b>State Senate District:</b> ", me_blkgrps_sf_DayNight$SEN_DIST, "<br/>",
+                      "<b>Town:</b> ", me_blkgrps_sf_DayNight$TOWN, "<br/>",
+                      "<b>Day-Night Avg Temp (°F):</b> ", round(me_blkgrps_sf_DayNight$meanAvgLST,1),"°", "<br/>",
+         "<b>Day-Night Avg Temp percentile:</b> ", round(me_blkgrps_sf_DayNight$meanAvgLSTpctile*100,0), "<br/>",
+                      "<b>Priority Populations: </b>", me_blkgrps_sf_DayNight$POPSlabel)
 
 leaflet(width = "100%") %>% 
   addProviderTiles(providers$Stamen.TonerLite) %>% 
-  addPolygons(data = nh_towns_simple,
+  addPolygons(data = me_towns_simple,
               weight = 0.7,
               opacity = 1,
               color = "gray",
@@ -444,7 +442,7 @@ leaflet(width = "100%") %>%
                 fillOpacity = 0,
                 bringToFront = TRUE),
               group = "State Senate Districts") %>%  
-  addPolygons(data = nh_blkgrps_sf_DayNight, 
+  addPolygons(data = me_blkgrps_sf_DayNight, 
               color = ~pal(meanAvgLST),
               weight = 0.5,
               opacity = 0.7,
@@ -461,7 +459,7 @@ leaflet(width = "100%") %>%
                 bringToFront = TRUE)) %>% 
   addLegend(title = "Highest Day-Night<br>Avg LST (°F) and<br>High Priority Pops", 
             pal = pal,
-            values = nh_blkgrps_sf_DayNight$meanAvgLST,
+            values = me_blkgrps_sf_DayNight$meanAvgLST,
             position = "bottomleft",
             labFormat = function(type, cuts, p) {
               n = length(cuts)
@@ -471,7 +469,7 @@ leaflet(width = "100%") %>%
                             formatC(cuts[-1], big.mark = ",", digits = 1, 
                                     format = "f"))
               }) %>% 
-  setView(lng = -71.5, 44, zoom = 7) %>% 
+  setView(lng = -68.97, 45.37, zoom = 6) %>% 
   # addMiniMap() %>% 
   addScaleBar(position = "bottomright") %>% 
   addSearchFeatures(targetGroups  = 'muni', 
@@ -492,36 +490,36 @@ leaflet(width = "100%") %>%
 # create color palette
 pal <- colorQuantile(
   palette = "YlOrRd",
-  domain = nh_blkgrps_sf_UHI24h$UHI24avg,
+  domain = me_blkgrps_sf_UHI24h$UHI24avg,
   n = 5)
 
 # binpal <- colorBin(
 #   palette = "YlOrRd",
-#   domain = nh_blkgrps_sf_UHI24h$UHI24avg,
+#   domain = me_blkgrps_sf_UHI24h$UHI24avg,
 #   bins = 5, pretty = FALSE
 # )
 
-PopupHouse <- paste0("New Hampshire state House District ", "<b>",house_districts$REP_DIST,"</b>", " has ", "<b>",house_districts$BGs80thDayNight,"</b>", " <b>Block Groups</b> with high percentages of priority populations experiencing Day-Night average urban heat island effects at the 80th percentile - ", round(min(nh_blkgrps_sf_UHI24h$UHI24avg),1),"° - or higher.", "<br/>",
+PopupHouse <- paste0("Maine state House District ", "<b>",house_districts$REP_DIST,"</b>", " has ", "<b>",house_districts$BGs80thDayNight,"</b>", " <b>Block Groups</b> with high percentages of priority populations experiencing Day-Night average urban heat island effects at the 80th percentile - ", round(min(me_blkgrps_sf_UHI24h$UHI24avg),1),"° - or higher.", "<br/>",
                      "<b>MIN Day-Night Avg UHI (°F):</b> ", round(house_districts$UHI24avg.min,1),"°", "<br/>",
                      "<b>MEAN Day-Night Avg UHI (°F):</b> ", round(house_districts$UHI24avg.mean,1),"°", "<br/>",
                      "<b>MAX Day-Night Avg UHI (°F):</b> ", round(house_districts$UHI24avg.max,1),"°")
 
-PopupSenate <- paste0("New Hampshire state Senate District ", "<b>",senate_districts$SEN_DIST,"</b>", " has ", "<b>",senate_districts$BGs80thDayNight,"</b>", " <b>Block Groups</b> with high percentages of priority populations experiencing Day-Night average urban heat island effects at the 80th percentile - ", round(min(nh_blkgrps_sf_UHI24h$UHI24avg),1),"° - or higher.", "<br/>",
+PopupSenate <- paste0("Maine state Senate District ", "<b>",senate_districts$SEN_DIST,"</b>", " has ", "<b>",senate_districts$BGs80thDayNight,"</b>", " <b>Block Groups</b> with high percentages of priority populations experiencing Day-Night average urban heat island effects at the 80th percentile - ", round(min(me_blkgrps_sf_UHI24h$UHI24avg),1),"° - or higher.", "<br/>",
                      "<b>MIN Day-Night Avg UHI (°F):</b> ", round(senate_districts$UHI24avg.min,1),"°", "<br/>",
                      "<b>MEAN Day-Night Avg UHI (°F):</b> ", round(senate_districts$UHI24avg.mean,1),"°", "<br/>",
                      "<b>MAX Day-Night Avg UHI (°F):</b> ", round(senate_districts$UHI24avg.max,1),"°")
 
-Popup <- paste0(nh_blkgrps_sf_UHI24h$NAME, "<br/>",
-                "<b>State House District:</b> ", nh_blkgrps_sf_UHI24h$REP_DIST, "<br/>",
-                  "<b>State Senate District:</b> ", nh_blkgrps_sf_UHI24h$SEN_DIST, "<br/>",
-                      "<b>Town:</b> ", nh_blkgrps_sf_UHI24h$TOWN, "<br/>",
-                      "<b>Day-Night Avg UHI (°F):</b> ", round(nh_blkgrps_sf_UHI24h$UHI24avg,1),"°", "<br/>",
-         "<b>Day-Night Avg UHI percentile:</b> ", round(nh_blkgrps_sf_UHI24h$UHI24avgpctile*100,0), "<br/>",
-                      "<b>Priority Populations: </b>", nh_blkgrps_sf_UHI24h$POPSlabel)
+Popup <- paste0(me_blkgrps_sf_UHI24h$NAME, "<br/>",
+                "<b>State House District:</b> ", me_blkgrps_sf_UHI24h$REP_DIST, "<br/>",
+                  "<b>State Senate District:</b> ", me_blkgrps_sf_UHI24h$SEN_DIST, "<br/>",
+                      "<b>Town:</b> ", me_blkgrps_sf_UHI24h$TOWN, "<br/>",
+                      "<b>Day-Night Avg UHI (°F):</b> ", round(me_blkgrps_sf_UHI24h$UHI24avg,1),"°", "<br/>",
+         "<b>Day-Night Avg UHI percentile:</b> ", round(me_blkgrps_sf_UHI24h$UHI24avgpctile*100,0), "<br/>",
+                      "<b>Priority Populations: </b>", me_blkgrps_sf_UHI24h$POPSlabel)
 
 leaflet(width = "100%") %>% 
   addProviderTiles(providers$Stamen.TonerLite) %>% 
-  addPolygons(data = nh_towns_simple,
+  addPolygons(data = me_towns_simple,
               weight = 0.7,
               opacity = 1,
               color = "gray",
@@ -559,7 +557,7 @@ leaflet(width = "100%") %>%
                 fillOpacity = 0,
                 bringToFront = TRUE),
               group = "State Senate Districts") %>% 
-  addPolygons(data = nh_blkgrps_sf_UHI24h, 
+  addPolygons(data = me_blkgrps_sf_UHI24h, 
               color = ~pal(UHI24avg),
               weight = 0.5,
               opacity = 0.7,
@@ -576,7 +574,7 @@ leaflet(width = "100%") %>%
                 bringToFront = TRUE)) %>% 
   addLegend(title = "Highest Day-Night<br>Urban Heat Island<br>effects (°F) and<br>High Priority Pops", 
             pal = pal,
-            values = nh_blkgrps_sf_UHI24h$UHI24avg,
+            values = me_blkgrps_sf_UHI24h$UHI24avg,
             position = "bottomleft",
             labFormat = function(type, cuts, p) {
               n = length(cuts)
@@ -586,7 +584,7 @@ leaflet(width = "100%") %>%
                             formatC(cuts[-1], big.mark = ",", digits = 1, 
                                     format = "f"))
               }) %>% 
-  setView(lng = -71.5, 44, zoom = 7) %>% 
+  setView(lng = -68.97, 45.37, zoom = 6) %>% 
   # addMiniMap() %>% 
   addScaleBar(position = "bottomright") %>% 
   addSearchFeatures(targetGroups  = 'muni', 
@@ -607,36 +605,36 @@ leaflet(width = "100%") %>%
 # create color palette
 pal <- colorQuantile(
   palette = "YlOrRd",
-  domain = nh_blkgrps_sf_Night$meanNightLST,
+  domain = me_blkgrps_sf_Night$meanNightLST,
   n = 5)
 
 # binpal <- colorBin(
 #   palette = "YlOrRd",
-#   domain = nh_blkgrps_sf_Night$meanNightLST,
+#   domain = me_blkgrps_sf_Night$meanNightLST,
 #   bins = 5, pretty = FALSE
 # )
 
-PopupHouse <- paste0("New Hampshire state House District ", "<b>",house_districts$REP_DIST,"</b>", " has ", "<b>",house_districts$BGs80thNight,"</b>", " <b>Block Groups</b> with high percentages of priority populations experiencing nighttime average land surface temperatures at the 80th percentile - ", round(min(nh_blkgrps_sf_Night$meanNightLST),1),"° - or higher.", "<br/>",
+PopupHouse <- paste0("Maine state House District ", "<b>",house_districts$REP_DIST,"</b>", " has ", "<b>",house_districts$BGs80thNight,"</b>", " <b>Block Groups</b> with high percentages of priority populations experiencing nighttime average land surface temperatures at the 80th percentile - ", round(min(me_blkgrps_sf_Night$meanNightLST),1),"° - or higher.", "<br/>",
                      "<b>MIN Night Avg Temp (°F):</b> ", round(house_districts$meanNightLST.min,1),"°", "<br/>",
                      "<b>MEAN Night Avg Temp (°F):</b> ", round(house_districts$meanNightLST.mean,1),"°", "<br/>",
                      "<b>MAX Night Avg Temp (°F):</b> ", round(house_districts$meanNightLST.max,1),"°")
 
-PopupSenate <- paste0("New Hampshire state Senate District ", "<b>",senate_districts$SEN_DIST,"</b>", " has ", "<b>",senate_districts$BGs80thNight,"</b>", " <b>Block Groups</b> with high percentages of priority populations experiencing nighttime average land surface temperatures at the 80th percentile - ", round(min(nh_blkgrps_sf_Night$meanNightLST),1),"° - or higher.", "<br/>",
+PopupSenate <- paste0("Maine state Senate District ", "<b>",senate_districts$SEN_DIST,"</b>", " has ", "<b>",senate_districts$BGs80thNight,"</b>", " <b>Block Groups</b> with high percentages of priority populations experiencing nighttime average land surface temperatures at the 80th percentile - ", round(min(me_blkgrps_sf_Night$meanNightLST),1),"° - or higher.", "<br/>",
                      "<b>MIN Night Avg Temp (°F):</b> ", round(senate_districts$meanNightLST.min,1),"°", "<br/>",
                      "<b>MEAN Night Avg Temp (°F):</b> ", round(senate_districts$meanNightLST.mean,1),"°", "<br/>",
                      "<b>MAX Night Avg Temp (°F):</b> ", round(senate_districts$meanNightLST.max,1),"°")
 
-Popup <- paste0(nh_blkgrps_sf_Night$NAME, "<br/>",
-                "<b>State House District:</b> ", nh_blkgrps_sf_Night$REP_DIST, "<br/>",
-                  "<b>State Senate District:</b> ", nh_blkgrps_sf_Night$SEN_DIST, "<br/>",
-                      "<b>Town:</b> ", nh_blkgrps_sf_Night$TOWN, "<br/>",
-                      "<b>Night Avg Temp (°F):</b> ", round(nh_blkgrps_sf_Night$meanNightLST,1),"°", "<br/>",
-         "<b>Night Avg Temp percentile:</b> ", round(nh_blkgrps_sf_Night$meanNightLSTpctile*100,0), "<br/>",
-                      "<b>Priority Populations: </b>", nh_blkgrps_sf_Night$POPSlabel)
+Popup <- paste0(me_blkgrps_sf_Night$NAME, "<br/>",
+                "<b>State House District:</b> ", me_blkgrps_sf_Night$REP_DIST, "<br/>",
+                  "<b>State Senate District:</b> ", me_blkgrps_sf_Night$SEN_DIST, "<br/>",
+                      "<b>Town:</b> ", me_blkgrps_sf_Night$TOWN, "<br/>",
+                      "<b>Night Avg Temp (°F):</b> ", round(me_blkgrps_sf_Night$meanNightLST,1),"°", "<br/>",
+         "<b>Night Avg Temp percentile:</b> ", round(me_blkgrps_sf_Night$meanNightLSTpctile*100,0), "<br/>",
+                      "<b>Priority Populations: </b>", me_blkgrps_sf_Night$POPSlabel)
 
 leaflet(width = "100%") %>% 
   addProviderTiles(providers$Stamen.TonerLite) %>% 
-  addPolygons(data = nh_towns_simple,
+  addPolygons(data = me_towns_simple,
               weight = 0.7,
               opacity = 1,
               color = "gray",
@@ -674,7 +672,7 @@ leaflet(width = "100%") %>%
                 fillOpacity = 0,
                 bringToFront = TRUE),
               group = "State Senate Districts") %>% 
-  addPolygons(data = nh_blkgrps_sf_Night, 
+  addPolygons(data = me_blkgrps_sf_Night, 
               color = ~pal(meanNightLST),
               weight = 0.5,
               opacity = 0.7,
@@ -691,7 +689,7 @@ leaflet(width = "100%") %>%
                 bringToFront = TRUE)) %>% 
   addLegend(title = "Highest Nighttime<br>Avg LST (°F) and<br>High Priority Pops", 
             pal = pal,
-            values = nh_blkgrps_sf_Night$meanNightLST,
+            values = me_blkgrps_sf_Night$meanNightLST,
             position = "bottomleft",
             labFormat = function(type, cuts, p) {
               n = length(cuts)
@@ -701,7 +699,7 @@ leaflet(width = "100%") %>%
                             formatC(cuts[-1], big.mark = ",", digits = 1, 
                                     format = "f"))
               }) %>% 
-  setView(lng = -71.5, 44, zoom = 7) %>% 
+  setView(lng = -68.97, 45.37, zoom = 6) %>% 
   # addMiniMap() %>% 
   addScaleBar(position = "bottomright") %>% 
   addSearchFeatures(targetGroups  = 'muni', 
@@ -720,7 +718,7 @@ leaflet(width = "100%") %>%
 ### About the maps
 
 These maps show communities (i.e. Census Block Groups) with high percentages of one or more priority population groups (80th percentile for the state) *AND* that experience the highest levels of ambient heat - measured as Land Surface Temperature (LST) - or Urban Heat Island (UHI) effects. The heat risk analysis presented here is based on Land Surface Temperatures (LST) derived from NASA’s
-[Moderate-resolution Imaging Spectroradiometer (MODIS)](https://modis.gsfc.nasa.gov/data/dataprod/mod11.php) satellite sensor. The three specific heat metrics highlighted here include: day-night average LST in the 80th percentile (i.e., `r round(min(nh_blkgrps_sf_DayNight$meanAvgLST),1)`°F or warmer), day-night average urban heat island effects in the 80th percentile (i.e., `r round(min(nh_blkgrps_sf_UHI24h$UHI24avg),1)`°F or warmer), and nighttime average LST in the 80th percentile (i.e., `r round(min(nh_blkgrps_sf_Night$meanNightLST),1)`°F or warmer). These metrics are three of the six heat metrics used to calculate [cumulative Heat burdens](index.html).
+[Moderate-resolution Imaging Spectroradiometer (MODIS)](https://modis.gsfc.nasa.gov/data/dataprod/mod11.php) satellite sensor. The three specific heat metrics highlighted here include: day-night average LST in the 80th percentile (i.e., `r round(min(me_blkgrps_sf_DayNight$meanAvgLST),1)`°F or warmer), day-night average urban heat island effects in the 80th percentile (i.e., `r round(min(me_blkgrps_sf_UHI24h$UHI24avg),1)`°F or warmer), and nighttime average LST in the 80th percentile (i.e., `r round(min(me_blkgrps_sf_Night$meanNightLST),1)`°F or warmer). These metrics are three of the six heat metrics used to calculate [cumulative Heat burdens](index.html).
 
 Priority populations represent demographic groups that environmental justice policy and research have identified as being especially vulnerable to environmental burdens as a consequence of social or economic disadvantage, physical vulnerability, or historic and persistent discrimination and inequality. These include:
 
@@ -738,7 +736,7 @@ Metrics of heat:
 August 4, 2019 derived from NASA’s
 [Moderate-resolution Imaging Spectroradiometer (MODIS)](https://modis.gsfc.nasa.gov/data/dataprod/mod11.php) satellite sensor. Values are presented in degrees of Fahrenheit (°F). 
 
-* Day-Night Average UHI: Urban Heat Island (UHI) effects refer to the difference in temperature between urban and rural areas of the state. Urban areas tend to be warmer than rural areas due to the heat-retaining qualities of concrete, asphalt and other impervious surfaces, as well as the relative absence of vegetation. The higher the UHI effect, the warmer an area is relative to the rural background. For this analysis UHI was measured as the difference between LST values across New Hampshire for each time period and the average LST for rural areas of the state for the same time periods. UHI is represented by the
+* Day-Night Average UHI: Urban Heat Island (UHI) effects refer to the difference in temperature between urban and rural areas of the state. Urban areas tend to be warmer than rural areas due to the heat-retaining qualities of concrete, asphalt and other impervious surfaces, as well as the relative absence of vegetation. The higher the UHI effect, the warmer an area is relative to the rural background. For this analysis UHI was measured as the difference between LST values across Maine for each time period and the average LST for rural areas of the state for the same time periods. UHI is represented by the
 following formula: UHI effect = LST - Mean Rural LST. LST is the land surface temperature for a satellite image pixel and Mean Rural LST is the average LST for satellite image pixels in rural areas of the state. 
 
 * Nighttime Average LST: Nighttime Land Surface Temperatures represent LST values collected during the night (12am - 3:06am) for the period July 28 to August 4, 2019. Values are presented in degrees of Fahrenheit (°F). High nighttime temperatures carry added significance for concerns about heat risk. Research has repeatedly shown that exposure to high nighttime temperatures over several days increases the probability of death during a heat wave in urban areas, especially for the elderly.
@@ -750,12 +748,13 @@ following formula: UHI effect = LST - Mean Rural LST. LST is the land surface te
 ## Population-weighted heat exposure for priority populations {.tabset}
 
 ### Day-Night Avg LST
-```{r graphDayNight, fig.align="center", fig.cap="Population-weighted average exposures to day-night average temperatures for populations of concern in New Hampshire."}
+```{r graphDayNight, fig.align="center", fig.cap="Population-weighted average exposures to day-night average temperatures for populations of concern in Maine."}
 # Add status variable and recode demographic names
 LST24hrPop %>% 
   mutate(
     Status = case_when(
-           Group == "Total Pop" ~ "State avg",
+           # Group == "Total Pop" ~ "State avg",
+           LST24hrwMean == pull(LST24hrPop[LST24hrPop$Group=="Total Pop",2]) ~ "State avg",
            LST24hrwMean < pull(LST24hrPop[LST24hrPop$Group=="Total Pop",2]) ~ "Below state avg",
            LST24hrwMean > pull(LST24hrPop[LST24hrPop$Group=="Total Pop",2]) ~ "Above state avg"),
     Group = recode(Group, "Minority" = "People of Color",
@@ -768,7 +767,7 @@ LST24hrPop %>%
          pointWidth = 15) %>% 
   hc_yAxis(title = list(text = "Population-weighted mean temperature (°F)"),
            labels = list(format = "{value}°"), 
-           floor = 70, ceiling = 79) %>% 
+           floor = 70, ceiling = 75) %>% 
   hc_xAxis(title = NULL, type = "category", labels = list(step = 1)) %>% 
   hc_tooltip(pointFormat = "{series.name}: {point.y}°") %>% 
   hc_title(text = "Population−Weighted Mean Day−Night Average Land Surface Temperature (°F) Exposure", useHTML = TRUE)
@@ -779,7 +778,7 @@ LST24hrPop %>%
 <br>
 
 ### Urban Heat Island
-```{r graphUHI, fig.align="center", fig.cap="Population-weighted average exposures to day-night average temperatures for populations of concern in New Hampshire."}
+```{r graphUHI, fig.align="center", fig.cap="Population-weighted average exposures to day-night average temperatures for populations of concern in Maine."}
 # Add status variable and recode demographic names
 UHI24hrPop %>% 
   mutate(
@@ -808,12 +807,13 @@ UHI24hrPop %>%
 <br>
 
 ### Nighttime Avg LST
-```{r graphNight, fig.align="center", fig.cap="Population-weighted average exposures to nighttime average temperatures for populations of concern in New Hampshire."}
+```{r graphNight, fig.align="center", fig.cap="Population-weighted average exposures to nighttime average temperatures for populations of concern in Maine."}
 # Add status variable and recode demographic names
 LSTNightPop %>% 
   mutate(
     Status = case_when(
-           Group == "Total Pop" ~ "State avg",
+           # Group == "Total Pop" ~ "State avg",
+           LSTNightwMean == pull(LSTNightPop[LSTNightPop$Group=="Total Pop",2]) ~ "State avg",
            LSTNightwMean < pull(LSTNightPop[LSTNightPop$Group=="Total Pop",2]) ~ "Below state avg",
            LSTNightwMean > pull(LSTNightPop[LSTNightPop$Group=="Total Pop",2]) ~ "Above state avg"),
     Group = recode(Group, "Minority" = "People of Color",
@@ -826,7 +826,7 @@ LSTNightPop %>%
          pointWidth = 15) %>% 
   hc_yAxis(title = list(text = "Population-weighted mean temperature (°F)"),
            labels = list(format = "{value}°"), 
-           floor = 60, ceiling = 66) %>% 
+           floor = 60, ceiling = 62) %>% 
   hc_xAxis(title = NULL, type = "category", labels = list(step = 1)) %>% 
   hc_tooltip(pointFormat = "{series.name}: {point.y}°") %>% 
   hc_title(text = "Population−Weighted Mean Nighttime Average Land Surface Temperature (°F) Exposure", useHTML = TRUE)
@@ -844,7 +844,7 @@ These graphs show population-weighted heat exposure by group for the following t
 August 4, 2019 derived from NASA’s
 [Moderate-resolution Imaging Spectroradiometer (MODIS)](https://modis.gsfc.nasa.gov/data/dataprod/mod11.php) satellite sensor. Values are presented in degrees of Fahrenheit (°F). 
 
-* Day-Night Average UHI: Urban Heat Island (UHI) effects refer to the difference in temperature between urban and rural areas of the state. Urban areas tend to be warmer than rural areas due to the heat-retaining qualities of concrete, asphalt and other impervious surfaces, as well as the relative absence of vegetation. The higher the UHI effect, the warmer an area is relative to the rural background. For this analysis UHI was measured as the difference between LST values across New Hampshire for each time period and the average LST for rural areas of the state for the same time periods. UHI is represented by the
+* Day-Night Average UHI: Urban Heat Island (UHI) effects refer to the difference in temperature between urban and rural areas of the state. Urban areas tend to be warmer than rural areas due to the heat-retaining qualities of concrete, asphalt and other impervious surfaces, as well as the relative absence of vegetation. The higher the UHI effect, the warmer an area is relative to the rural background. For this analysis UHI was measured as the difference between LST values across Maine for each time period and the average LST for rural areas of the state for the same time periods. UHI is represented by the
 following formula: UHI effect = LST - Mean Rural LST. LST is the land surface temperature for a satellite image pixel and Mean Rural LST is the average LST for satellite image pixels in rural areas of the state. 
 
 * Nighttime Average LST: Nighttime Land Surface Temperatures represent LST values collected during the night (12am - 3:06am) for the period July 28 to August 4, 2019. Values are presented in degrees of Fahrenheit (°F). High nighttime temperatures carry added significance for concerns about heat risk. Research has repeatedly shown that exposure to high nighttime temperatures over several days increases the probability of death during a heat wave in urban areas, especially for the elderly.
@@ -861,9 +861,9 @@ For example, limited English speaking households (i.e., 'Limited English HH'), r
 
 ```{r townTable, fig.align="center"}
 # create variables for use in inline text example to explain percentile ranks
-exLSTtown <- nh_towns %>% as.data.frame() %>% filter(pctrank_meanAvgLST.mean > 95) %>% select(NAME) %>% slice_tail(n = 1) %>% pull()
-exLST <- nh_towns %>% as.data.frame() %>% filter(NAME == exLSTtown) %>% select(meanAvgLST.mean) %>% pull() %>% round(., 1)
-exLSTpct <- nh_towns %>% as.data.frame() %>% filter(NAME == exLSTtown) %>% select(pctrank_meanAvgLST.mean) %>% pull() %>% round(., 1)
+exLSTtown <- me_towns %>% as.data.frame() %>% filter(pctrank_meanAvgLST.mean > 95) %>% select(NAME) %>% slice_tail(n = 1) %>% pull()
+exLST <- me_towns %>% as.data.frame() %>% filter(NAME == exLSTtown) %>% select(meanAvgLST.mean) %>% pull() %>% round(., 1)
+exLSTpct <- me_towns %>% as.data.frame() %>% filter(NAME == exLSTtown) %>% select(pctrank_meanAvgLST.mean) %>% pull() %>% round(., 1)
 
 # create object to hold complex headers for table
 sketch1 = htmltools::withTags(table(
@@ -881,7 +881,7 @@ sketch1 = htmltools::withTags(table(
   )
 ))
 
-nh_towns %>% 
+me_towns %>% 
   as.data.frame() %>% 
   filter(NAME != "County subdivisions not defined") %>%
   select(NAMELSAD, meanAvgLST.mean, pctrank_meanAvgLST.mean, UHI24avg.mean,
@@ -980,7 +980,7 @@ These tables show the average day-night land surface temperatures (LST), Urban H
 August 4, 2019 derived from NASA’s
 [Moderate-resolution Imaging Spectroradiometer (MODIS)](https://modis.gsfc.nasa.gov/data/dataprod/mod11.php) satellite sensor. Values are presented in degrees of Fahrenheit (°F). 
 
-* Day-Night Average UHI: Urban Heat Island (UHI) effects refer to the difference in temperature between urban and rural areas of the state. Urban areas tend to be warmer than rural areas due to the heat-retaining qualities of concrete, asphalt and other impervious surfaces, as well as the relative absence of vegetation. The higher the UHI effect, the warmer an area is relative to the rural background. For this analysis UHI was measured as the difference between LST values across New Hampshire for each time period and the average LST for rural areas of the state for the same time periods. UHI is represented by the
+* Day-Night Average UHI: Urban Heat Island (UHI) effects refer to the difference in temperature between urban and rural areas of the state. Urban areas tend to be warmer than rural areas due to the heat-retaining qualities of concrete, asphalt and other impervious surfaces, as well as the relative absence of vegetation. The higher the UHI effect, the warmer an area is relative to the rural background. For this analysis UHI was measured as the difference between LST values across Maine for each time period and the average LST for rural areas of the state for the same time periods. UHI is represented by the
 following formula: UHI effect = LST - Mean Rural LST. LST is the land surface temperature for a satellite image pixel and Mean Rural LST is the average LST for satellite image pixels in rural areas of the state. 
 
 * Nighttime Average LST: Nighttime Land Surface Temperatures represent LST values collected during the night (12am - 3:06am) for the period July 28 to August 4, 2019. Values are presented in degrees of Fahrenheit (°F). High nighttime temperatures carry added significance for concerns about heat risk. Research has repeatedly shown that exposure to high nighttime temperatures over several days increases the probability of death during a heat wave in urban areas, especially for the elderly.
