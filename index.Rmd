@@ -36,11 +36,11 @@ library(geojsonio)
 
 meta() %>%
   meta_description(
-    "Environmental justice analysis of transportation-related burdens and benefits in New Hampshire") %>% 
+    "Environmental justice analysis of transportation-related burdens and benefits in Maine") %>% 
   meta_viewport() %>% 
   meta_social(
-    title = "Investing for Equity in New Hampshire",
-    url = "http://dgl.salemstate.edu/luna/InvestingForEquity/NH/",
+    title = "Investing for Equity in Maine",
+    url = "http://dgl.salemstate.edu/luna/InvestingForEquity/ME/",
     og_type = "website",
     og_author = c("Marcos Luna", "Neenah Estrella-Luna"),
     twitter_card_type = "summary",
@@ -50,59 +50,57 @@ meta() %>%
 
 ```{r data, include=FALSE, cache=TRUE}
 # load("DATA/ne_layers.rds")
-nh_blkgrps_sf <- readRDS(file = "../DATA/nh_blkgrps_sf_CUM.Rds")
+me_blkgrps_sf <- readRDS(file = "../DATA/me_blkgrps_sf_CUM.Rds")
 
 # download state outline
-nh_state <- states(cb = TRUE) %>% 
-  filter(NAME == "New Hampshire")
+me_state <- states(cb = TRUE) %>% 
+  filter(NAME == "Maine")
 
 #create layer of municipalities
-nh_towns <- county_subdivisions("NH") %>% 
+me_towns <- county_subdivisions("ME") %>% 
   st_transform(., crs = 4326) %>% 
   select(NAME,NAMELSAD) %>% 
   filter(NAME != "County subdivisions not defined") %>% 
-  ms_clip(., nh_state) %>% 
+  ms_clip(., me_state) %>% 
   ms_simplify(., keep = 0.1, keep_shapes = TRUE) 
 
 # Assign municipality names to block groups
-nh_blkgrps_sf <- county_subdivisions("NH") %>% 
-  st_transform(., crs = st_crs(nh_blkgrps_sf)) %>% 
+me_blkgrps_sf <- county_subdivisions("ME") %>% 
+  st_transform(., crs = st_crs(me_blkgrps_sf)) %>% 
   transmute(TOWN = NAME) %>% 
-  st_join(nh_blkgrps_sf, ., largest = TRUE) %>% 
-  mutate(NAME = str_remove_all(NAME, ", New Hampshire")) %>% 
+  st_join(me_blkgrps_sf, ., largest = TRUE) %>% 
+  mutate(NAME = str_remove_all(NAME, ", Maine")) %>% 
   st_transform(., crs = 4326)
 
 # create layer of state house districts and join table of burdens
-house_districts <- geojson_read("https://opendata.arcgis.com/datasets/f264be37ee714132b268924c44b91803_2.geojson", what = "sp") %>% 
-  st_as_sf(.) %>% 
-  transmute(REP_DIST = NHHouse201) %>%
-  st_transform(., crs = 4326) %>% 
+house_districts <- st_read("../DATA/shapefiles/Maine_House_Districts_2013_GeoLibrary-shp", "Maine_House_Districts_2013_GeoLibrary") %>%
+  transmute(REP_DIST = HD2013) %>% 
+  st_transform(., crs = 4326) %>%
   st_make_valid() %>% 
-  left_join(., read_csv("../tables/NH_burdensCnt_house.csv"), 
+  left_join(., read_csv("../tables/ME_burdensCnt_house.csv"), 
             by = c("REP_DIST" = "House District"))
 
 # create layer of state senate districts and join table of burdens
-senate_districts <- geojson_read("https://opendata.arcgis.com/datasets/df824f020357423b9f23384f80d9e2d1_4.geojson", what = "sp") %>% 
-  st_as_sf(.) %>% 
-  transmute(SEN_DIST = Senate2012) %>% 
-  st_transform(., crs = 4326) %>% 
+senate_districts <- st_read("../DATA/shapefiles/Maine_State_Senate_Districts_2013_GeoLibrary-shp", "Maine_State_Senate_Districts_2013_GeoLibrary") %>%
+  transmute(SEN_DIST = SD2013) %>% 
+  st_transform(., crs = 4326) %>%
   st_make_valid() %>% 
-  left_join(., read_csv("../tables/NH_burdensCnt_senate.csv"), 
+  left_join(., read_csv("../tables/ME_burdensCnt_senate.csv"), 
             by = c("SEN_DIST" = "Senate District")) 
 
 # Assign state house district names to block groups
-nh_blkgrps_sf <- house_districts %>% 
+me_blkgrps_sf <- house_districts %>% 
   select(REP_DIST) %>% 
-  st_join(nh_blkgrps_sf, ., largest = TRUE)
+  st_join(me_blkgrps_sf, ., largest = TRUE)
 
 # Assign state senate district names to block groups
-nh_blkgrps_sf <- senate_districts %>% 
+me_blkgrps_sf <- senate_districts %>% 
   select(SEN_DIST) %>% 
-  st_join(nh_blkgrps_sf, ., largest = TRUE)
+  st_join(me_blkgrps_sf, ., largest = TRUE)
 
 
 # Create labeling variables to identify burdens and pops of a concern in a given block group that contributed to cumulative burden score
-nh_blkgrps_sf <- nh_blkgrps_sf %>% 
+me_blkgrps_sf <- me_blkgrps_sf %>% 
   mutate(EmissionsBurden2 = if_else(EmissionsBurden == "P", "Emissions", "NA"),
          TransportBurden2 = if_else(TransportBurden == "T", "Transportation", "NA"),
          HeatBurden2 = if_else(HeatBurden == "H", "Heat", "NA"),
@@ -140,8 +138,8 @@ nh_blkgrps_sf <- nh_blkgrps_sf %>%
     ) %>% 
   filter(BURDENSlabel != "No Burden" & POPSlabel != "No Pops of Concern")
 
-# reduce number of variables in nh_blkgrps_sf for faster loading AND reduce number of vertices
-nh_blkgrps_sf <- nh_blkgrps_sf %>%
+# reduce number of variables in me_blkgrps_sf for faster loading AND reduce number of vertices
+me_blkgrps_sf <- me_blkgrps_sf %>%
   select(BurdenCount, NAME, REP_DIST, SEN_DIST, TOWN, BURDENSlabel, 
          POPSlabel) %>% 
   ms_simplify(., keep = 0.1, keep_shapes = TRUE)
@@ -160,11 +158,11 @@ senate_districts <- senate_districts %>%
          `3+ Burdens` = X3..Burdens)
 ```
 
-New Hampshire needs progressive and equitable investment in transportation. This investment should prioritize communities that have borne the brunt of burdens from the current transportation system, and which have benefited the least from the same system.
+Maine needs progressive and equitable investment in transportation. This investment should prioritize communities that have borne the brunt of burdens from the current transportation system, and which have benefited the least from the same system.
 
-Our analysis shows that areas with high percentages of priority populations and the highest rankings of multiple cumulative environmental burdens fall in the southern third and northwestern corner of state, particularly around the largest urban areas. Despite relatively low population numbers, limited English speaking households and people of color most frequently experience the greatest number and types of burdens, especially for air quality, heat, and flood or evacuation risks. Priority populations, especially those over 64 and in lower income households, in rural and suburban areas, lack transportation options and face high costs for transportation.
+Our analysis shows that areas with high percentages of priority populations and the highest rankings of multiple cumulative environmental burdens fall in the southern third of the state, particularly around the largest urban areas and along the I-95 corridor. Limited English speaking households and people of color most frequently experience the greatest number and types of burdens, especially for air quality, heat, and flood or evacuation risks. Priority populations, especially adults with lower levels of education, disabilities, and in lower income households, in rural and suburban areas, lack transportation options and face high costs for transportation.
 
-These interactive figures identify communities across New Hampshire that are most overburdened and most vulnerable to transportation-related environmental burdens or the absence of transportation-related benefits.
+These interactive figures identify communities across Maine that are most overburdened and most vulnerable to transportation-related environmental burdens or the absence of transportation-related benefits.
 
 <br>
 
@@ -173,7 +171,7 @@ These interactive figures identify communities across New Hampshire that are mos
 ### Map
 ```{r map, fig.align="left", fig.cap="Map of Census block groups with the highest concentrations of one or more priority populations AND exposed to the highest levels of 1 - 4 cumulative environmental burdens (e.g., emissions, lack of transport access, heat risk, flood evacuation risk)."}
 # create labeling variable for map of cumulative burden scores. Note that for some reason that I can't fathom, the legend items will be displayed out of alignment if I try to manually add labels in the labels parameter for addLegend. 
-nh_blkgrps_sf <- nh_blkgrps_sf %>% 
+me_blkgrps_sf <- me_blkgrps_sf %>% 
   mutate(BurdenCountLabel = 
            if_else(BurdenCount == 1, 
                    paste0(BurdenCount," Hi Burden + Hi Priority Pops"),
@@ -181,26 +179,26 @@ nh_blkgrps_sf <- nh_blkgrps_sf %>%
 
 pal <- colorFactor(
   palette = "YlOrRd",
-  domain = nh_blkgrps_sf$BurdenCountLabel)
+  domain = me_blkgrps_sf$BurdenCountLabel)
 
 # alternatively, create a colors vector to pair with arbitrary labels
 colors <- brewer.pal(n = 4, "YlOrRd")
 
-PopupHouse <- paste0("New Hampshire state House District ", "<b>",house_districts$REP_DIST,"</b>", " has ", "<b>",house_districts$`3 Burdens`,"</b>", " <b>Block Groups</b> with high percentages of priority populations experiencing <b>3 categories</b> of highest cumulative burdens, and ", "<b>",house_districts$`4 Burdens`,"</b>", " <b>Block Groups</b> experiencing <b>4 categories</b> of highest cumulative burdens.")
+PopupHouse <- paste0("Maine state House District ", "<b>",house_districts$REP_DIST,"</b>", " has ", "<b>",house_districts$`3 Burdens`,"</b>", " <b>Block Groups</b> with high percentages of priority populations experiencing <b>3 categories</b> of highest cumulative burdens, and ", "<b>",house_districts$`4 Burdens`,"</b>", " <b>Block Groups</b> experiencing <b>4 categories</b> of highest cumulative burdens.")
 
-PopupSenate <- paste0("New Hampshire state Senate District ", "<b>",senate_districts$SEN_DIST,"</b>", " has ", "<b>",senate_districts$`3 Burdens`,"</b>", " <b>Block Groups</b> with high percentages of priority populations experiencing <b>3 categories</b> of highest cumulative burdens, and ", "<b>",senate_districts$`4 Burdens`,"</b>", " <b>Block Groups</b> experiencing <b>4 categories</b> of highest cumulative burdens.")
+PopupSenate <- paste0("Maine state Senate District ", "<b>",senate_districts$SEN_DIST,"</b>", " has ", "<b>",senate_districts$`3 Burdens`,"</b>", " <b>Block Groups</b> with high percentages of priority populations experiencing <b>3 categories</b> of highest cumulative burdens, and ", "<b>",senate_districts$`4 Burdens`,"</b>", " <b>Block Groups</b> experiencing <b>4 categories</b> of highest cumulative burdens.")
 
-Popup <- paste0(nh_blkgrps_sf$NAME, "<br/>",
-                "<b>State House District:</b> ", nh_blkgrps_sf$REP_DIST, "<br/>",
-                  "<b>State Senate District:</b> ", nh_blkgrps_sf$SEN_DIST, "<br/>",
-                      "<b>Town:</b> ", nh_blkgrps_sf$TOWN, "<br/>",
-                      "<b>Number of Burdens:</b> ", nh_blkgrps_sf$BurdenCount, "<br/>",
-                      "<b>Burden Categories: </b>", nh_blkgrps_sf$BURDENSlabel,"<br/>",
-                      "<b>Priority Populations: </b>", nh_blkgrps_sf$POPSlabel)
+Popup <- paste0(me_blkgrps_sf$NAME, "<br/>",
+                "<b>State House District:</b> ", me_blkgrps_sf$REP_DIST, "<br/>",
+                  "<b>State Senate District:</b> ", me_blkgrps_sf$SEN_DIST, "<br/>",
+                      "<b>Town:</b> ", me_blkgrps_sf$TOWN, "<br/>",
+                      "<b>Number of Burdens:</b> ", me_blkgrps_sf$BurdenCount, "<br/>",
+                      "<b>Burden Categories: </b>", me_blkgrps_sf$BURDENSlabel,"<br/>",
+                      "<b>Priority Populations: </b>", me_blkgrps_sf$POPSlabel)
 
 leaflet(width = "100%") %>% 
   addProviderTiles(providers$Stamen.TonerLite) %>% 
-  addPolygons(data = nh_towns,
+  addPolygons(data = me_towns,
               weight = 0.7,
               opacity = 1,
               color = "gray",
@@ -238,7 +236,7 @@ leaflet(width = "100%") %>%
                 fillOpacity = 0,
                 bringToFront = TRUE),
               group = "State Senate Districts") %>% 
-  addPolygons(data = nh_blkgrps_sf,
+  addPolygons(data = me_blkgrps_sf,
               fillColor = ~pal(BurdenCountLabel), 
               weight = 0.5,
               opacity = 0.7,
@@ -255,14 +253,14 @@ leaflet(width = "100%") %>%
                 bringToFront = TRUE)) %>% 
   addLegend(title = "Cumulative Burdens", 
             pal = pal, # palette colors tied to values
-            values = nh_blkgrps_sf$BurdenCountLabel,
+            values = me_blkgrps_sf$BurdenCountLabel,
             # colors = colors, # hex color values paired with labels
             # labels = c("1 Hi Burden + Hi Priority Pops ",
             #            "2 Hi Burdens + Hi Priority Pops",
             #            "3 Hi Burdens + Hi Priority Pops",
             #            "4 Hi Burdens + Hi Priority Pops"),
             position = "bottomleft") %>% 
-  setView(lng = -71.5, 44, zoom = 7) %>% 
+  setView(lng = -68.97, 45.37, zoom = 6) %>% 
   # addMiniMap() %>% 
   addScaleBar(position = "bottomright") %>% 
   addSearchFeatures(targetGroups  = 'muni', 
@@ -318,7 +316,7 @@ Environmental burdens and benefits span four domains:
 #   geom_bar(stat = "identity") +
 #   coord_flip() +
 #   labs(x = "", y = "Percentage", fill = "Burden\nCategories",
-#        title = "Percentage of New Hampshire Population within\nCumulative Burden Categories") + 
+#        title = "Percentage of Maine Population within\nCumulative Burden Categories") + 
 #   theme_light() +
 #   theme(panel.grid.major.y = element_blank(),
 #         panel.border = element_blank(),
@@ -327,7 +325,7 @@ Environmental burdens and benefits span four domains:
 #                                  "2 categories", "1 category"))
 
 # create a wide table for use in dynamic highchart
-nh_cum_burdens <- read_csv("../tables/NH_cum_burden.csv") %>% 
+me_cum_burdens <- read_csv("../tables/ME_cum_burden.csv") %>% 
   as.data.frame() %>% 
   mutate(Group = recode(Group, "Minority" = "People of Color",
                         "No HS Dip" = "No HS Diploma")) %>%
@@ -342,10 +340,10 @@ nh_cum_burdens <- read_csv("../tables/NH_cum_burden.csv") %>%
   as.data.frame()
 
 # store values for use in text
-LEH1 <- nh_cum_burdens %>% filter(Group == "Limited English HH") %>% select(`1 Burden`) %>% pull()
-LEH2 <- nh_cum_burdens %>% filter(Group == "Limited English HH") %>% select(`2 Burdens`) %>% pull()
-LEH4 <- nh_cum_burdens %>% filter(Group == "Limited English HH") %>% rowwise %>% summarize(Total = sum(c_across(2:5))) %>% pull()
-THH <- nh_cum_burdens %>% filter(Group == "Total HH") %>% rowwise %>% summarize(Total = sum(c_across(2:5))) %>% pull()
+LEH1 <- me_cum_burdens %>% filter(Group == "Limited English HH") %>% select(`1 Burden`) %>% pull()
+LEH2 <- me_cum_burdens %>% filter(Group == "Limited English HH") %>% select(`2 Burdens`) %>% pull()
+LEH4 <- me_cum_burdens %>% filter(Group == "Limited English HH") %>% rowwise %>% summarize(Total = sum(c_across(2:5))) %>% pull()
+THH <- me_cum_burdens %>% filter(Group == "Total HH") %>% rowwise %>% summarize(Total = sum(c_across(2:5))) %>% pull()
 
 # create a function to generate chart, otherwise each series must be added manually. Thanks to https://ox-it.github.io/OxfordIDN_htmlwidgets/charts/StackedBarCharts/ for this solution!
 stacked_bar_chart <- function(data = NA,
@@ -386,10 +384,10 @@ stacked_bar_chart <- function(data = NA,
     hc_legend(reversed = TRUE)
 }
 
-categories_column <- names(nh_cum_burdens[,1])
-measure_columns <- names(nh_cum_burdens[,2:5])
+categories_column <- names(me_cum_burdens[,1])
+measure_columns <- names(me_cum_burdens[,2:5])
 
-stacked_bar_chart(data = nh_cum_burdens,
+stacked_bar_chart(data = me_cum_burdens,
                   categories_column = "Group",
                   measure_columns = measure_columns,
                   stacking_type = "normal",
@@ -434,7 +432,7 @@ sketch1 = htmltools::withTags(table(
   )
 ))
 
-read_csv("../tables/NH_burdens_town.csv") %>% 
+read_csv("../tables/ME_burdens_town.csv") %>% 
   mutate(across(starts_with("Pct"), ~./100)) %>% # let DT do formatting
   mutate(across(starts_with("Pct"), ~if_else(. > 1, 1, .))) %>%
   datatable(., rownames = FALSE, options = list(pageLength = 10), 
@@ -465,7 +463,7 @@ sketch2 = htmltools::withTags(table(
   )
 ))
 
-read_csv("../tables/NH_burdens_house.csv") %>% 
+read_csv("../tables/ME_burdens_house.csv") %>% 
   mutate(across(starts_with("Pct"), ~./100)) %>% # let DT do formatting
   datatable(., rownames = FALSE, options = list(pageLength = 10), 
             container = sketch2) %>% 
@@ -493,7 +491,7 @@ sketch3 = htmltools::withTags(table(
   )
 ))
 
-read_csv("../tables/NH_burdens_senate.csv") %>% 
+read_csv("../tables/ME_burdens_senate.csv") %>% 
   mutate(across(starts_with("Pct"), ~./100)) %>% # let DT do formatting
   datatable(., rownames = FALSE, options = list(pageLength = 10), 
             container = sketch3) %>% 
