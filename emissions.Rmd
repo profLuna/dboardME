@@ -26,48 +26,46 @@ library(geojsonio)
 
 ```{r data, include=FALSE, cache=TRUE}
 # load("DATA/ne_layers.rds")
-nh_blkgrps_sf <- readRDS(file = "../DATA/nh_blkgrps_sf_CUM.Rds")
+me_blkgrps_sf <- readRDS(file = "../DATA/me_blkgrps_sf_CUM.Rds")
 
 #create layer of municipalities
-nh_towns <- county_subdivisions("NH") %>% 
+me_towns <- county_subdivisions("ME") %>% 
   st_transform(., crs = 4326) %>% 
   select(NAME,NAMELSAD)
 
 # Assign municipality names to block groups
-nh_blkgrps_sf <- county_subdivisions("NH") %>% 
-  st_transform(., crs = st_crs(nh_blkgrps_sf)) %>% 
+me_blkgrps_sf <- county_subdivisions("ME") %>% 
+  st_transform(., crs = st_crs(me_blkgrps_sf)) %>% 
   transmute(TOWN = NAMELSAD, GEOIDTN = GEOID) %>% 
-  st_join(nh_blkgrps_sf, ., largest = TRUE) %>% 
-  mutate(NAME = str_remove_all(NAME, ", New Hampshire")) %>% 
+  st_join(me_blkgrps_sf, ., largest = TRUE) %>% 
+  mutate(NAME = str_remove_all(NAME, ", Maine")) %>% 
   st_transform(., crs = 4326)
 
 # create layer of state house districts
-house_districts <- geojson_read("https://opendata.arcgis.com/datasets/f264be37ee714132b268924c44b91803_2.geojson", what = "sp") %>% 
-  st_as_sf(.) %>% 
-  transmute(REP_DIST = NHHouse201) %>%
-  st_transform(., crs = 4326) %>% 
+house_districts <- st_read("../DATA/shapefiles/Maine_House_Districts_2013_GeoLibrary-shp", "Maine_House_Districts_2013_GeoLibrary") %>%
+  transmute(REP_DIST = HD2013) %>% 
+  st_transform(., crs = 4326) %>%
   st_make_valid()
 
 # create layer of state senate districts
-senate_districts <- geojson_read("https://opendata.arcgis.com/datasets/df824f020357423b9f23384f80d9e2d1_4.geojson", what = "sp") %>% 
-  st_as_sf(.) %>% 
-  transmute(SEN_DIST = Senate2012) %>% 
-  st_transform(., crs = 4326) %>% 
+senate_districts <- st_read("../DATA/shapefiles/Maine_State_Senate_Districts_2013_GeoLibrary-shp", "Maine_State_Senate_Districts_2013_GeoLibrary") %>%
+  transmute(SEN_DIST = SD2013) %>% 
+  st_transform(., crs = 4326) %>%
   st_make_valid()
 
 # Assign state house district names to block groups
-nh_blkgrps_sf <- house_districts %>% 
+me_blkgrps_sf <- house_districts %>% 
   select(REP_DIST) %>% 
-  st_join(nh_blkgrps_sf, ., largest = TRUE)
+  st_join(me_blkgrps_sf, ., largest = TRUE)
 
 # Assign state senate district names to block groups
-nh_blkgrps_sf <- senate_districts %>% 
+me_blkgrps_sf <- senate_districts %>% 
   select(SEN_DIST) %>% 
-  st_join(nh_blkgrps_sf, ., largest = TRUE)
+  st_join(me_blkgrps_sf, ., largest = TRUE)
 
 
 # Create labeling variables to identify pops of a concern in a given block group that contributed to cumulative burden score
-nh_blkgrps_sf <- nh_blkgrps_sf %>% 
+me_blkgrps_sf <- me_blkgrps_sf %>% 
   mutate(Minority80th = if_else(percent_rank(minority_pctE) >= 0.8, "People of Color","NA"),
     Under5_80th = if_else(percent_rank(pct_under5E) >= 0.8, "Under 5", "NA"),
     Under18_80th = if_else(percent_rank(pct_under18E) >= 0.8, "Under 18", "NA"),
@@ -95,7 +93,7 @@ nh_blkgrps_sf <- nh_blkgrps_sf %>%
   # filter(POPSlabel != "No Pops of Concern")
 
 # create summary stats of pollutant values by municipality
-# muniEmissions <- nh_blkgrps_sf %>%
+# muniEmissions <- me_blkgrps_sf %>%
 #   as.data.frame() %>% 
 #   select(TOWN, PM25_19, DSLPM_19, PTRAF_19) %>% 
 #   group_by(TOWN) %>% 
@@ -107,10 +105,10 @@ nh_blkgrps_sf <- nh_blkgrps_sf %>%
 #                 ~percent_rank(.x)*100,
 #                 .names = "pctrank_{.col}"))
 
-muniEmissions <- nh_blkgrps_sf %>%
+muniEmissions <- me_blkgrps_sf %>%
   select(TOWN, PM25_19, DSLPM_19, PTRAF_19) %>% 
   mutate(OldArea = as.numeric(st_area(.))) %>% 
-  st_intersection(nh_towns) %>% 
+  st_intersection(me_towns) %>% 
   mutate(NewArea = as.numeric(st_area(.)),
          Prop = NewArea/OldArea) %>% 
   as.data.frame() %>% 
@@ -124,7 +122,7 @@ muniEmissions <- nh_blkgrps_sf %>%
   rename(TOWN = NAMELSAD)
 
 # create summary of pollutant values by house district
-houseEmissions <- nh_blkgrps_sf %>%
+houseEmissions <- me_blkgrps_sf %>%
   as.data.frame() %>% 
   select(REP_DIST, PM25_19, DSLPM_19, PTRAF_19) %>% 
   group_by(REP_DIST) %>% 
@@ -138,7 +136,7 @@ houseEmissions <- nh_blkgrps_sf %>%
   drop_na()
 
 # create summary of pollutant values by senate district
-senateEmissions <- nh_blkgrps_sf %>%
+senateEmissions <- me_blkgrps_sf %>%
   as.data.frame() %>% 
   select(SEN_DIST, PM25_19, DSLPM_19, PTRAF_19) %>% 
   group_by(SEN_DIST) %>% 
@@ -152,64 +150,64 @@ senateEmissions <- nh_blkgrps_sf %>%
   drop_na()
 
 # Create counts of block groups at 80th percentile PM2.5 by jurisdiction
-muniPM25_80th <- nh_blkgrps_sf %>% 
+muniPM25_80th <- me_blkgrps_sf %>% 
   as.data.frame() %>% 
   filter(percent_rank(PM25_19) >= 0.8 & POPSlabel != "No Pops of Concern") %>% 
   group_by(TOWN) %>% 
   summarize(BGs80thPM25 = n())
 
-housePM25_80th <- nh_blkgrps_sf %>% 
+housePM25_80th <- me_blkgrps_sf %>% 
   as.data.frame() %>% 
   filter(percent_rank(PM25_19) >= 0.8 & POPSlabel != "No Pops of Concern") %>% 
   group_by(REP_DIST) %>% 
   summarize(BGs80thPM25 = n())
 
-senatePM25_80th <- nh_blkgrps_sf %>% 
+senatePM25_80th <- me_blkgrps_sf %>% 
   as.data.frame() %>% 
   filter(percent_rank(PM25_19) >= 0.8 & POPSlabel != "No Pops of Concern") %>% 
   group_by(SEN_DIST) %>% 
   summarize(BGs80thPM25 = n())
 
 # Create counts of block groups at 80th percentile DPM by jurisdiction
-muniDPM_80th <- nh_blkgrps_sf %>% 
+muniDPM_80th <- me_blkgrps_sf %>% 
   as.data.frame() %>% 
   filter(percent_rank(DSLPM_19) >= 0.8 & POPSlabel != "No Pops of Concern") %>% 
   group_by(TOWN) %>% 
   summarize(BGs80thDPM = n())
 
-houseDPM_80th <- nh_blkgrps_sf %>% 
+houseDPM_80th <- me_blkgrps_sf %>% 
   as.data.frame() %>% 
   filter(percent_rank(DSLPM_19) >= 0.8 & POPSlabel != "No Pops of Concern") %>% 
   group_by(REP_DIST) %>% 
   summarize(BGs80thDPM = n())
 
-senateDPM_80th <- nh_blkgrps_sf %>% 
+senateDPM_80th <- me_blkgrps_sf %>% 
   as.data.frame() %>% 
   filter(percent_rank(DSLPM_19) >= 0.8 & POPSlabel != "No Pops of Concern") %>% 
   group_by(SEN_DIST) %>% 
   summarize(BGs80thDPM = n())
 
 # Create counts of block groups at 80th percentile PTRAF by jurisdiction
-muniPTRAF_80th <- nh_blkgrps_sf %>% 
+muniPTRAF_80th <- me_blkgrps_sf %>% 
   as.data.frame() %>% 
   filter(percent_rank(PTRAF_19) >= 0.8 & POPSlabel != "No Pops of Concern") %>% 
   group_by(TOWN) %>% 
   summarize(BGs80thPTRAF = n())
 
-housePTRAF_80th <- nh_blkgrps_sf %>% 
+housePTRAF_80th <- me_blkgrps_sf %>% 
   as.data.frame() %>% 
   filter(percent_rank(PTRAF_19) >= 0.8 & POPSlabel != "No Pops of Concern") %>% 
   group_by(REP_DIST) %>% 
   summarize(BGs80thPTRAF = n())
 
-senatePTRAF_80th <- nh_blkgrps_sf %>% 
+senatePTRAF_80th <- me_blkgrps_sf %>% 
   as.data.frame() %>% 
   filter(percent_rank(PTRAF_19) >= 0.8 & POPSlabel != "No Pops of Concern") %>% 
   group_by(SEN_DIST) %>% 
   summarize(BGs80thPTRAF = n())
 
 # join stats to jurisdiction layers
-nh_towns <- nh_towns %>% 
+me_towns <- me_towns %>% 
   left_join(., muniEmissions, by = c("NAMELSAD" = "TOWN")) %>% 
   left_join(., muniPM25_80th, by = c("NAMELSAD" = "TOWN")) %>% 
   left_join(., muniDPM_80th, by = c("NAMELSAD" = "TOWN")) %>% 
@@ -233,36 +231,36 @@ senate_districts <- senate_districts %>%
   replace_na(list(BGs80thPM25 = 0, BGs80thDPM = 0, BGs80thPTRAF = 0)) %>% 
   ms_simplify(., keep = 0.1, keep_shapes = TRUE)
 
-# create layer of nh_blkgrp_sf for 80th percentile
-nh_blkgrps_sf_PM25 <- nh_blkgrps_sf %>% 
+# create layer of me_blkgrp_sf for 80th percentile
+me_blkgrps_sf_PM25 <- me_blkgrps_sf %>% 
   filter(percent_rank(PM25_19) >= 0.8 & POPSlabel != "No Pops of Concern") %>% 
   select(NAME, REP_DIST, SEN_DIST, TOWN, POPSlabel, PM25_19, PM25pctile) %>% 
   ms_simplify(., keep = 0.1, keep_shapes = TRUE)
 
-nh_blkgrps_sf_DPM <- nh_blkgrps_sf %>% 
+me_blkgrps_sf_DPM <- me_blkgrps_sf %>% 
   filter(percent_rank(DSLPM_19) >= 0.8 & POPSlabel != "No Pops of Concern") %>% 
   select(NAME, REP_DIST, SEN_DIST, TOWN, POPSlabel, DSLPM_19, DPMpctile) %>% 
   ms_simplify(., keep = 0.1, keep_shapes = TRUE)
 
-nh_blkgrps_sf_PTRAF <- nh_blkgrps_sf %>% 
+me_blkgrps_sf_PTRAF <- me_blkgrps_sf %>% 
   filter(percent_rank(PTRAF_19) >= 0.8 & POPSlabel != "No Pops of Concern") %>% 
   select(NAME, REP_DIST, SEN_DIST, TOWN, POPSlabel, PTRAF_19, PTRAFpctile) %>% 
   ms_simplify(., keep = 0.1, keep_shapes = TRUE)
 
 # clean up
 rm(list = ls(pattern = paste("muni", "_80th", "Emissions", 
-                             "nh_blkgrps_sf$", sep = "|")))
+                             "me_blkgrps_sf$", sep = "|")))
 
-# # reduce number of variables in nh_blkgrps_sf for faster loading
-# nh_blkgrps_sf <- nh_blkgrps_sf %>%
+# # reduce number of variables in me_blkgrps_sf for faster loading
+# me_blkgrps_sf <- me_blkgrps_sf %>%
 #   select(BurdenCount, NAME, REP_DIST, SEN_DIST, TOWN, BURDENSlabel, POPSlabel)
 ```
 
 Transportation accounts for a significant share of air pollution. 
 
-Concentrations of hazardous air pollutants and associated risks are highest in the southeast corner of New Hampshire and around the urbanized areas along the southwestern edge of the state, as well as along the I-93 corridor. Limited English speaking households and people of color are by far the most exposed to higher levels of air pollutants and are living in close proximity to high traffic corridors.
+Concentrations of hazardous air pollutants and associated risks are highest in the southeast corner of Maine and areas on or near I-95 as far north as Bangor. Limited English speaking households and people of color are by far the most exposed to higher levels of air pollutants and are living in close proximity to high traffic corridors.
 
-These interactive figures identify communities across New Hampshire that are most overburdened and most vulnerable to three transportation-related burdens: PM~2.5~, Diesel Particulate Matter (DPM), and Traffic Volume and Proximity.
+These interactive figures identify communities across Maine that are most overburdened and most vulnerable to three transportation-related burdens: PM~2.5~, Diesel Particulate Matter (DPM), and Traffic Volume and Proximity.
 
 <br>
 
@@ -272,47 +270,47 @@ These interactive figures identify communities across New Hampshire that are mos
 ```{r mapPM25, fig.align="left", fig.cap="Map of Census block groups with the highest concentrations of one or more priority populations AND highest PM2.5 concentrations."}
 # create simplified towns layer for faster mapping
 # download state outline
-nh_state <- states(cb = TRUE) %>% 
-  filter(NAME == "New Hampshire")
+me_state <- states(cb = TRUE) %>% 
+  filter(NAME == "Maine")
 # filter out extra polygons, clip out boundaries from water, simplify
-nh_towns_simple <- nh_towns %>% 
+me_towns_simple <- me_towns %>% 
   filter(NAME != "County subdivisions not defined") %>% 
-  ms_clip(., nh_state) %>% 
+  ms_clip(., me_state) %>% 
   ms_simplify(., keep = 0.1, keep_shapes = TRUE)
 
 # create color palette
 palPM25 <- colorQuantile(
   palette = "YlOrRd",
-  domain = nh_blkgrps_sf_PM25$PM25_19,
+  domain = me_blkgrps_sf_PM25$PM25_19,
   n = 5)
 
 # binpalPM25 <- colorBin(
 #   palette = "YlOrRd",
-#   domain = nh_blkgrps_sf_PM25$PM25_19,
+#   domain = me_blkgrps_sf_PM25$PM25_19,
 #   bins = 5, pretty = FALSE
 # )
 
-PopupHouse <- paste0("New Hampshire state House District ", "<b>",house_districts$REP_DIST,"</b>", " has ", "<b>",house_districts$BGs80thPM25,"</b>", " <b>Block Groups</b> with high percentages of priority populations experiencing <b>PM<sub>2.5</sub></b> concentrations at the 80th percentile or higher.", "<br/>",
+PopupHouse <- paste0("Maine state House District ", "<b>",house_districts$REP_DIST,"</b>", " has ", "<b>",house_districts$BGs80thPM25,"</b>", " <b>Block Groups</b> with high percentages of priority populations experiencing <b>PM<sub>2.5</sub></b> concentrations at the 80th percentile or higher.", "<br/>",
                      "<b>MINIMUM PM<sub>2.5</sub> (&mu;g/m<sup>3</sup>):</b> ", round(house_districts$PM25_19.min,2), "<br/>",
                      "<b>MEAN PM<sub>2.5</sub> (&mu;g/m<sup>3</sup>):</b> ", round(house_districts$PM25_19.mean,2), "<br/>",
                      "<b>MAXIMUM PM<sub>2.5</sub> (&mu;g/m<sup>3</sup>):</b> ", round(house_districts$PM25_19.max,2))
 
-PopupSenate <- paste0("New Hampshire state Senate District ", "<b>",senate_districts$SEN_DIST,"</b>", " has ", "<b>",senate_districts$BGs80thPM25,"</b>", " <b>Block Groups</b> with high percentages of priority populations experiencing <b>PM<sub>2.5</sub></b> concentrations at the 80th percentile or higher.", "<br/>",
+PopupSenate <- paste0("Maine state Senate District ", "<b>",senate_districts$SEN_DIST,"</b>", " has ", "<b>",senate_districts$BGs80thPM25,"</b>", " <b>Block Groups</b> with high percentages of priority populations experiencing <b>PM<sub>2.5</sub></b> concentrations at the 80th percentile or higher.", "<br/>",
                      "<b>MINIMUM PM<sub>2.5</sub> (&mu;g/m<sup>3</sup>):</b> ", round(senate_districts$PM25_19.min,2), "<br/>",
                      "<b>MEAN PM<sub>2.5</sub> (&mu;g/m<sup>3</sup>):</b> ", round(senate_districts$PM25_19.mean,2), "<br/>",
                      "<b>MAXIMUM PM<sub>2.5</sub> (&mu;g/m<sup>3</sup>):</b> ", round(senate_districts$PM25_19.max,2))
 
-Popup <- paste0(nh_blkgrps_sf_PM25$NAME, "<br/>",
-                "<b>State House District:</b> ", nh_blkgrps_sf_PM25$REP_DIST, "<br/>",
-                  "<b>State Senate District:</b> ", nh_blkgrps_sf_PM25$SEN_DIST, "<br/>",
-                      "<b>Town:</b> ", nh_blkgrps_sf_PM25$TOWN, "<br/>",
-                      "<b>PM<sub>2.5</sub> (&mu;g/m<sup>3</sup>):</b> ", round(nh_blkgrps_sf_PM25$PM25_19,2), "<br/>",
-         "<b>PM<sub>2.5</sub> percentile:</b> ", round(nh_blkgrps_sf_PM25$PM25pctile*100,0), "<br/>",
-                      "<b>Priority Populations: </b>", nh_blkgrps_sf_PM25$POPSlabel)
+Popup <- paste0(me_blkgrps_sf_PM25$NAME, "<br/>",
+                "<b>State House District:</b> ", me_blkgrps_sf_PM25$REP_DIST, "<br/>",
+                  "<b>State Senate District:</b> ", me_blkgrps_sf_PM25$SEN_DIST, "<br/>",
+                      "<b>Town:</b> ", me_blkgrps_sf_PM25$TOWN, "<br/>",
+                      "<b>PM<sub>2.5</sub> (&mu;g/m<sup>3</sup>):</b> ", round(me_blkgrps_sf_PM25$PM25_19,2), "<br/>",
+         "<b>PM<sub>2.5</sub> percentile:</b> ", round(me_blkgrps_sf_PM25$PM25pctile*100,0), "<br/>",
+                      "<b>Priority Populations: </b>", me_blkgrps_sf_PM25$POPSlabel)
 
 leaflet(width = "100%") %>% 
   addProviderTiles(providers$Stamen.TonerLite) %>% 
-  addPolygons(data = nh_towns_simple,
+  addPolygons(data = me_towns_simple,
               weight = 0.7,
               opacity = 1,
               color = "gray",
@@ -350,7 +348,7 @@ leaflet(width = "100%") %>%
                 fillOpacity = 0,
                 bringToFront = TRUE),
               group = "State Senate Districts") %>% 
-  addPolygons(data = nh_blkgrps_sf_PM25, 
+  addPolygons(data = me_blkgrps_sf_PM25, 
               color = ~palPM25(PM25_19),
               weight = 0.5,
               opacity = 0.7,
@@ -367,7 +365,7 @@ leaflet(width = "100%") %>%
                 bringToFront = TRUE)) %>% 
   addLegend(title = "Highest PM<sub>2.5</sub> (&mu;g/m<sup>3</sup>)<br>for Priority Populations", 
             pal = palPM25,
-            values = round(nh_blkgrps_sf_PM25$PM25_19,2),
+            values = round(me_blkgrps_sf_PM25$PM25_19,2),
             position = "bottomleft",
             labFormat = function(type, cuts, p) {
               n = length(cuts)
@@ -379,7 +377,7 @@ leaflet(width = "100%") %>%
                 '</span>'
                 )
               }) %>% 
-  setView(lng = -71.5, 44, zoom = 7) %>% 
+  setView(lng = -68.97, 45.37, zoom = 6) %>% 
   # addMiniMap() %>% 
   addScaleBar(position = "bottomright") %>% 
   addSearchFeatures(targetGroups  = 'muni', 
@@ -400,36 +398,36 @@ leaflet(width = "100%") %>%
 # create color palette
 palDPM <- colorQuantile(
   palette = "YlOrRd",
-  domain = nh_blkgrps_sf_DPM$DSLPM_19,
+  domain = me_blkgrps_sf_DPM$DSLPM_19,
   n = 5)
 
 # binpalPM25 <- colorBin(
 #   palette = "YlOrRd",
-#   domain = nh_blkgrps_sf_PM25$PM25_19,
+#   domain = me_blkgrps_sf_PM25$PM25_19,
 #   bins = 5, pretty = FALSE
 # )
 
-PopupHouse <- paste0("New Hampshire state House District ", "<b>",house_districts$REP_DIST,"</b>", " has ", "<b>",house_districts$BGs80thDPM,"</b>", " <b>Block Groups</b> with high percentages of priority populations experiencing <b>DPM</b> concentrations at the 80th percentile or higher.", "<br/>",
+PopupHouse <- paste0("Maine state House District ", "<b>",house_districts$REP_DIST,"</b>", " has ", "<b>",house_districts$BGs80thDPM,"</b>", " <b>Block Groups</b> with high percentages of priority populations experiencing <b>DPM</b> concentrations at the 80th percentile or higher.", "<br/>",
                      "<b>MINIMUM DPM (&mu;g/m<sup>3</sup>):</b> ", round(house_districts$DSLPM_19.min,2), "<br/>",
                      "<b>MEAN DPM (&mu;g/m<sup>3</sup>):</b> ", round(house_districts$DSLPM_19.mean,2), "<br/>",
                      "<b>MAXIMUM DPM (&mu;g/m<sup>3</sup>):</b> ", round(house_districts$DSLPM_19.max,2))
 
-PopupSenate <- paste0("New Hampshire state Senate District ", "<b>",senate_districts$SEN_DIST,"</b>", " has ", "<b>",senate_districts$BGs80thDPM,"</b>", " <b>Block Groups</b> with high percentages of priority populations experiencing <b>DPM concentrations at the 80th percentile or higher.", "<br/>",
+PopupSenate <- paste0("Maine state Senate District ", "<b>",senate_districts$SEN_DIST,"</b>", " has ", "<b>",senate_districts$BGs80thDPM,"</b>", " <b>Block Groups</b> with high percentages of priority populations experiencing <b>DPM concentrations at the 80th percentile or higher.", "<br/>",
                      "<b>MINIMUM DPM (&mu;g/m<sup>3</sup>):</b> ", round(senate_districts$DSLPM_19.min,2), "<br/>",
                      "<b>MEAN DPM (&mu;g/m<sup>3</sup>):</b> ", round(senate_districts$DSLPM_19.mean,2), "<br/>",
                      "<b>MAXIMUM DPM (&mu;g/m<sup>3</sup>):</b> ", round(senate_districts$DSLPM_19.max,2))
 
-Popup <- paste0(nh_blkgrps_sf_DPM$NAME, "<br/>",
-                "<b>State House District:</b> ", nh_blkgrps_sf_DPM$REP_DIST, "<br/>",
-                  "<b>State Senate District:</b> ", nh_blkgrps_sf_DPM$SEN_DIST, "<br/>",
-                      "<b>Town:</b> ", nh_blkgrps_sf_DPM$TOWN, "<br/>",
-                      "<b>DPM (&mu;g/m<sup>3</sup>):</b> ", round(nh_blkgrps_sf_DPM$DSLPM_19,2), "<br/>",
-         "<b>DPM percentile:</b> ", round(nh_blkgrps_sf_DPM$DPMpctile*100,0), "<br/>",
-                      "<b>Priority Populations: </b>", nh_blkgrps_sf_DPM$POPSlabel)
+Popup <- paste0(me_blkgrps_sf_DPM$NAME, "<br/>",
+                "<b>State House District:</b> ", me_blkgrps_sf_DPM$REP_DIST, "<br/>",
+                  "<b>State Senate District:</b> ", me_blkgrps_sf_DPM$SEN_DIST, "<br/>",
+                      "<b>Town:</b> ", me_blkgrps_sf_DPM$TOWN, "<br/>",
+                      "<b>DPM (&mu;g/m<sup>3</sup>):</b> ", round(me_blkgrps_sf_DPM$DSLPM_19,2), "<br/>",
+         "<b>DPM percentile:</b> ", round(me_blkgrps_sf_DPM$DPMpctile*100,0), "<br/>",
+                      "<b>Priority Populations: </b>", me_blkgrps_sf_DPM$POPSlabel)
 
 leaflet(width = "100%") %>% 
   addProviderTiles(providers$Stamen.TonerLite) %>% 
-  addPolygons(data = nh_towns_simple,
+  addPolygons(data = me_towns_simple,
               weight = 0.7,
               opacity = 1,
               color = "gray",
@@ -467,7 +465,7 @@ leaflet(width = "100%") %>%
                 fillOpacity = 0,
                 bringToFront = TRUE),
               group = "State Senate Districts") %>% 
-  addPolygons(data = nh_blkgrps_sf_DPM, 
+  addPolygons(data = me_blkgrps_sf_DPM, 
               color = ~palDPM(DSLPM_19),
               weight = 0.5,
               opacity = 0.7,
@@ -484,7 +482,7 @@ leaflet(width = "100%") %>%
                 bringToFront = TRUE)) %>% 
   addLegend(title = "Highest Diesel<br>Particulate Matter (&mu;g/m<sup>3</sup>)<br>for Priority Populations", 
             pal = palDPM,
-            values = nh_blkgrps_sf_DPM$DSLPM_19,
+            values = me_blkgrps_sf_DPM$DSLPM_19,
             position = "bottomleft",
             labFormat = function(type, cuts, p) {
               n = length(cuts)
@@ -494,7 +492,7 @@ leaflet(width = "100%") %>%
                             formatC(cuts[-1], big.mark = ",", digits = 2, 
                                     format = "f"))
               }) %>% 
-  setView(lng = -71.5, 44, zoom = 7) %>% 
+  setView(lng = -68.97, 45.37, zoom = 6) %>% 
   # addMiniMap() %>% 
   addScaleBar(position = "bottomright") %>% 
   addSearchFeatures(targetGroups  = 'muni', 
@@ -515,36 +513,36 @@ leaflet(width = "100%") %>%
 # create color palette
 palPTRAF <- colorQuantile(
   palette = "YlOrRd",
-  domain = nh_blkgrps_sf_PTRAF$PTRAF_19,
+  domain = me_blkgrps_sf_PTRAF$PTRAF_19,
   n = 5)
 
 # binpalPM25 <- colorBin(
 #   palette = "YlOrRd",
-#   domain = nh_blkgrps_sf_PM25$PM25_19,
+#   domain = me_blkgrps_sf_PM25$PM25_19,
 #   bins = 5, pretty = FALSE
 # )
 
-PopupHouse <- paste0("New Hampshire state House District ", "<b>",house_districts$REP_DIST,"</b>", " has ", "<b>",house_districts$BGs80thPTRAF,"</b>", " <b>Block Groups</b> with high percentages of priority populations experiencing <b>Traffic Proximity and Volume (PTRAF)</b> values at the 80th percentile or higher.", "<br/>",
+PopupHouse <- paste0("Maine state House District ", "<b>",house_districts$REP_DIST,"</b>", " has ", "<b>",house_districts$BGs80thPTRAF,"</b>", " <b>Block Groups</b> with high percentages of priority populations experiencing <b>Traffic Proximity and Volume (PTRAF)</b> values at the 80th percentile or higher.", "<br/>",
                      "<b>MINIMUM PTRAF (AADT/Distance(km)):</b> ", formatC(round(house_districts$PTRAF_19.min,0), big.mark = ","), "<br/>",
                      "<b>MEAN PTRAF (AADT/Distance(km)):</b> ", formatC(round(house_districts$PTRAF_19.mean,0), big.mark = ","), "<br/>",
                      "<b>MAXIMUM PTRAF (AADT/Distance(km)):</b> ", formatC(round(house_districts$PTRAF_19.max,0), big.mark = ",", digits = 5, format = "d"))
 
-PopupSenate <- paste0("New Hampshire state Senate District ", "<b>",senate_districts$SEN_DIST,"</b>", " has ", "<b>",senate_districts$BGs80thPTRAF,"</b>", " <b>Block Groups</b> with high percentages of priority populations experiencing <b>Traffic Proximity and Volume (PTRAF)</b> values at the 80th percentile or higher.", "<br/>",
+PopupSenate <- paste0("Maine state Senate District ", "<b>",senate_districts$SEN_DIST,"</b>", " has ", "<b>",senate_districts$BGs80thPTRAF,"</b>", " <b>Block Groups</b> with high percentages of priority populations experiencing <b>Traffic Proximity and Volume (PTRAF)</b> values at the 80th percentile or higher.", "<br/>",
                      "<b>MINIMUM PTRAF (AADT/Distance(km)):</b> ", formatC(round(senate_districts$PTRAF_19.min,0), big.mark = ","), "<br/>",
                      "<b>MEAN PTRAF (AADT/Distance(km)):</b> ", formatC(round(senate_districts$PTRAF_19.mean,0), big.mark = ","), "<br/>",
                      "<b>MAXIMUM PTRAF (AADT/Distance(km)):</b> ", formatC(round(senate_districts$PTRAF_19.max,0), big.mark = ",", digits = 5, format = "d"))
 
-Popup <- paste0(nh_blkgrps_sf_PTRAF$NAME, "<br/>",
-                "<b>State House District:</b> ", nh_blkgrps_sf_PTRAF$REP_DIST, "<br/>",
-                  "<b>State Senate District:</b> ", nh_blkgrps_sf_PTRAF$SEN_DIST, "<br/>",
-                      "<b>Town:</b> ", nh_blkgrps_sf_PTRAF$TOWN, "<br/>",
-                      "<b>PTRAF (AADT/Distance(km)):</b> ", formatC(round(nh_blkgrps_sf_PTRAF$PTRAF_19,0), big.mark = ",", digits = 5, format = "d"), "<br/>",
-         "<b>PTRAF percentile:</b> ", round(nh_blkgrps_sf_PTRAF$PTRAFpctile*100,0), "<br/>",
-                      "<b>Priority Populations: </b>", nh_blkgrps_sf_PTRAF$POPSlabel)
+Popup <- paste0(me_blkgrps_sf_PTRAF$NAME, "<br/>",
+                "<b>State House District:</b> ", me_blkgrps_sf_PTRAF$REP_DIST, "<br/>",
+                  "<b>State Senate District:</b> ", me_blkgrps_sf_PTRAF$SEN_DIST, "<br/>",
+                      "<b>Town:</b> ", me_blkgrps_sf_PTRAF$TOWN, "<br/>",
+                      "<b>PTRAF (AADT/Distance(km)):</b> ", formatC(round(me_blkgrps_sf_PTRAF$PTRAF_19,0), big.mark = ",", digits = 5, format = "d"), "<br/>",
+         "<b>PTRAF percentile:</b> ", round(me_blkgrps_sf_PTRAF$PTRAFpctile*100,0), "<br/>",
+                      "<b>Priority Populations: </b>", me_blkgrps_sf_PTRAF$POPSlabel)
 
 leaflet(width = "100%") %>% 
   addProviderTiles(providers$Stamen.TonerLite) %>% 
-  addPolygons(data = nh_towns_simple,
+  addPolygons(data = me_towns_simple,
               weight = 0.7,
               opacity = 1,
               color = "gray",
@@ -582,7 +580,7 @@ leaflet(width = "100%") %>%
                 fillOpacity = 0,
                 bringToFront = TRUE),
               group = "State Senate Districts") %>% 
-  addPolygons(data = nh_blkgrps_sf_PTRAF, 
+  addPolygons(data = me_blkgrps_sf_PTRAF, 
               color = ~palPTRAF(PTRAF_19),
               weight = 0.5,
               opacity = 0.7,
@@ -599,7 +597,7 @@ leaflet(width = "100%") %>%
                 bringToFront = TRUE)) %>% 
   addLegend(title = "Highest Traffic<br>Exposure (PTRAF)<br>for Priority Populations", 
             pal = palPTRAF,
-            values = nh_blkgrps_sf_PTRAF$PTRAF_19,
+            values = me_blkgrps_sf_PTRAF$PTRAF_19,
             position = "bottomleft",
             labFormat = function(type, cuts, p) {
               n = length(cuts)
@@ -609,7 +607,7 @@ leaflet(width = "100%") %>%
                             formatC(cuts[-1], big.mark = ",", digits = 5, 
                                     format = "d"))
               }) %>% 
-  setView(lng = -71.5, 44, zoom = 7) %>% 
+  setView(lng = -68.97, 45.37, zoom = 6) %>% 
   # addMiniMap() %>% 
   addScaleBar(position = "bottomright") %>% 
   addSearchFeatures(targetGroups  = 'muni', 
@@ -657,16 +655,16 @@ Air emissions related to transportation:
 
 ### PM2.5
 
-```{r graphPM25, fig.align="center", fig.cap="Population-weighted average exposures to PM2.5 for priority populations in New Hampshire relative to the state average."}
+```{r graphPM25, fig.align="center", fig.cap="Population-weighted average exposures to PM2.5 for priority populations in Maine relative to the state average."}
 # Load data
 load("../DATA/ne_layers.rds")
 
-# Create data subsets of New Hampshire
-nh_blkgrp_sf <- ne_blkgrp_sf %>% 
-  filter(STATE == "New Hampshire") %>% 
+# Create data subsets of Maine
+me_blkgrp_sf <- ne_blkgrp_sf %>% 
+  filter(STATE == "Maine") %>% 
   st_transform(., crs = 4326)
 
-PM25popAvg <- nh_blkgrp_sf %>% 
+PM25popAvg <- me_blkgrp_sf %>% 
   as.data.frame() %>% 
   dplyr::select(totalpopE,
                 nhwhitepopE,
@@ -694,7 +692,7 @@ PM25popAvg <- nh_blkgrp_sf %>%
             PM25Mean = mean(PM25_19, na.rm = TRUE)) %>% 
   spread(key = Group, value = PM25wMean) %>% 
   transmute(Minority = (minorityE/totalpopE - 1)*100,
-         #Minority_NHW = (minorityE/nhwhitepopE - 1)*100,
+         #Minority_MEW = (minorityE/nhwhitepopE - 1)*100,
          `Limited English HH` = (eng_limitE/eng_hhE - 1)*100,
          `Low Income` = (num2povE/totalpopE - 1)*100,
          `No HS Dip` = (lthsE/totalpopE - 1)*100,
@@ -704,7 +702,7 @@ PM25popAvg <- nh_blkgrp_sf %>%
 
 # # clean up
 # rm(list = ls(pattern = "ne_"))
-# rm(nh_blkgrp_sf)
+# rm(me_blkgrp_sf)
 
 PM25popAvg %>% 
   arrange(desc(Pct)) %>% 
@@ -729,17 +727,17 @@ PM25popAvg %>%
 
 ### DPM
 
-```{r graphDPM, fig.align="center", fig.cap="Population-weighted average exposures to Diesel Particulate Matter (DPM) for priority populations in New Hampshire relative to the state average."}
+```{r graphDPM, fig.align="center", fig.cap="Population-weighted average exposures to Diesel Particulate Matter (DPM) for priority populations in Maine relative to the state average."}
 # # Load data
 # load("../DATA/ne_layers.rds")
 # 
-# # Create data subsets of New Hampshire
-# nh_blkgrp_sf <- ne_blkgrp_sf %>% 
-#   filter(STATE == "New Hampshire") %>% 
+# # Create data subsets of Maine
+# me_blkgrp_sf <- ne_blkgrp_sf %>% 
+#   filter(STATE == "Maine") %>% 
 #   st_transform(., crs = 4326)
 
-# Pop Weighted avg of DPM for all Groups in New Hampshire relative to NE average
-DPMpopAvg <- nh_blkgrp_sf %>% 
+# Pop Weighted avg of DPM for all Groups in Maine relative to NE average
+DPMpopAvg <- me_blkgrp_sf %>% 
   as.data.frame() %>% 
   dplyr::select(totalpopE,
                 nhwhitepopE,
@@ -767,7 +765,7 @@ DPMpopAvg <- nh_blkgrp_sf %>%
             DPMMean = mean(DSLPM_19, na.rm = TRUE)) %>% 
   spread(key = Group, value = DPMwMean) %>% 
   transmute(Minority = (minorityE/totalpopE - 1)*100,
-         #Minority_NHW = (minorityE/nhwhitepopE - 1)*100,
+         #Minority_MEW = (minorityE/nhwhitepopE - 1)*100,
          `Limited English HH` = (eng_limitE/eng_hhE - 1)*100,
          `Low Income` = (num2povE/totalpopE - 1)*100,
          `No HS Dip` = (lthsE/totalpopE - 1)*100,
@@ -777,7 +775,7 @@ DPMpopAvg <- nh_blkgrp_sf %>%
 
 # # clean up
 # rm(list = ls(pattern = "ne_"))
-# rm(nh_blkgrp_sf)
+# rm(me_blkgrp_sf)
 
 # store values for use in text
 LEH1 <- DPMpopAvg %>% filter(Group == "Limited English HH") %>% select(Pct) %>% pull()
@@ -805,17 +803,17 @@ DPMpopAvg %>%
 
 ### Traffic
 
-```{r graphPTRAF, fig.align="center", fig.cap="Population-weighted average exposures to Traffic Proximity and Volume (PTRAF) for priority populations in New Hampshire relative to the state average."}
+```{r graphPTRAF, fig.align="center", fig.cap="Population-weighted average exposures to Traffic Proximity and Volume (PTRAF) for priority populations in Maine relative to the state average."}
 # # Load data
 # load("../DATA/ne_layers.rds")
 # 
-# # Create data subsets of New Hampshire
-# nh_blkgrp_sf <- ne_blkgrp_sf %>% 
-#   filter(STATE == "New Hampshire") %>% 
+# # Create data subsets of Maine
+# me_blkgrp_sf <- ne_blkgrp_sf %>% 
+#   filter(STATE == "Maine") %>% 
 #   st_transform(., crs = 4326)
 
-# Pop Weighted avg of PTRAF for all Groups in New Hampshire relative to state average
-PTRAFpopAvg <- nh_blkgrp_sf %>% 
+# Pop Weighted avg of PTRAF for all Groups in Maine relative to state average
+PTRAFpopAvg <- me_blkgrp_sf %>% 
   as.data.frame() %>% 
   dplyr::select(totalpopE,
                 nhwhitepopE,
@@ -843,7 +841,7 @@ PTRAFpopAvg <- nh_blkgrp_sf %>%
             DPMMean = mean(PTRAF_19, na.rm = TRUE)) %>% 
   spread(key = Group, value = DPMwMean) %>% 
   transmute(`People of Color` = (minorityE/totalpopE - 1)*100,
-         #Minority_NHW = (minorityE/nhwhitepopE - 1)*100,
+         #Minority_MEW = (minorityE/nhwhitepopE - 1)*100,
          `Limited English HH` = (eng_limitE/eng_hhE - 1)*100,
          `Low Income` = (num2povE/totalpopE - 1)*100,
          `No HS Diploma` = (lthsE/totalpopE - 1)*100,
@@ -853,7 +851,7 @@ PTRAFpopAvg <- nh_blkgrp_sf %>%
 
 # clean up
 rm(list = ls(pattern = "ne_"))
-rm(nh_blkgrp_sf)
+rm(me_blkgrp_sf)
 
 PTRAFpopAvg %>% 
   arrange(desc(Pct)) %>% 
@@ -897,9 +895,9 @@ For example, limited English speaking households (i.e., 'Limited English HH') in
 
 ```{r townTable, fig.align="center"}
 # create variables for use in inline text example to explain percentile ranks
-exPM25town <- nh_towns %>% as.data.frame() %>% filter(pctrank_PM25_19.mean > 95) %>% select(NAME) %>% slice_tail(n = 1) %>% pull()
-exPM25 <- nh_towns %>% as.data.frame() %>% filter(NAME == exPM25town) %>% select(PM25_19.mean) %>% pull() %>% round(., 3)
-exPM25pct <- nh_towns %>% as.data.frame() %>% filter(NAME == exPM25town) %>% select(pctrank_PM25_19.mean) %>% pull() %>% round(., 1)
+exPM25town <- me_towns %>% as.data.frame() %>% filter(pctrank_PM25_19.mean > 95) %>% select(NAME) %>% slice_tail(n = 1) %>% pull()
+exPM25 <- me_towns %>% as.data.frame() %>% filter(NAME == exPM25town) %>% select(PM25_19.mean) %>% pull() %>% round(., 3)
+exPM25pct <- me_towns %>% as.data.frame() %>% filter(NAME == exPM25town) %>% select(pctrank_PM25_19.mean) %>% pull() %>% round(., 1)
 
 # create object to hold complex headers for table
 sketch1 = htmltools::withTags(table(
@@ -917,7 +915,7 @@ sketch1 = htmltools::withTags(table(
   )
 ))
 
-nh_towns %>% 
+me_towns %>% 
   as.data.frame() %>% 
   arrange(NAME) %>% 
   filter(NAME != "County subdivisions not defined") %>%
