@@ -29,14 +29,14 @@ library(geojsonio)
 load("../DATA/ne_layers.rds")
 
 # isolate MA census geography and relevant variables
-nh_blkgrps_sf <- ne_blkgrp_sf %>% 
-  filter(STATE == "New Hampshire") %>% 
+me_blkgrps_sf <- ne_blkgrp_sf %>% 
+  filter(STATE == "Maine") %>% 
   select(GEOID, NAME, STATE, bg_area_m2, totalpopE, minorityE, minority_pctE, under5E, pct_under5E, under18E, pct_under18E, over64E, pct_over64E, householdsE, eng_hhE, eng_limitE, eng_limit_pctE, age25upE, lthsE, pct_lthsE, povknownE, num2povE, pct2povE) %>%
   st_transform(., crs = 4326) %>% 
   filter(!st_is_empty(.)) 
 
-nh_tracts_sf <- ne_tracts_sf %>% 
-  filter(STATE == "New Hampshire") %>% 
+me_tracts_sf <- ne_tracts_sf %>% 
+  filter(STATE == "Maine") %>% 
   select(GEOID, NAME, totalpopE, STATE, Over18E, disabledOver18E, 
          pct_disabilityOver18E, totalHHE, HHnoCarE, pct_HHnoCarE) %>% 
   st_transform(., crs = 4326) %>% 
@@ -46,11 +46,11 @@ nh_tracts_sf <- ne_tracts_sf %>%
 # rm(list = ls(pattern = "ne_"))
 
 # Read in evacuation risk data. Developed parts of census units; need to filter and join.
-load("../DATA/FEMA/NH/nfhza_census.Rds")
-load("../DATA/FEMA/NH/hevac_census.Rds")
+load("../DATA/FEMA/ME/nfhza_census.Rds")
+load("../DATA/FEMA/ME/hevac_census.Rds")
 
 # join NFHZA flood hazard and hurricane evac records where percentage of pop of concern in flood or hurricane evac prone areas is 80th percentile
-nh_blkgrps_sf <- nh_blkgrps_nfhza %>% 
+me_blkgrps_sf <- me_blkgrps_nfhza %>% 
   as.data.frame() %>% 
   mutate(NewEngHH = Proportion*eng_hhE,
          NewAge25Up = Proportion*age25upE,
@@ -67,9 +67,9 @@ nh_blkgrps_sf <- nh_blkgrps_nfhza %>%
            percent_rank(sum_NewPov/sum_NewPop) >= 0.8 |
            percent_rank(sum_NewLths/sum_NewAge25Up) >= 0.8) %>% 
   transmute(GEOID = GEOID, nfhzaRisk = "F", floodtypes = floodtypes) %>% 
-  left_join(nh_blkgrps_sf,., by="GEOID")
+  left_join(me_blkgrps_sf,., by="GEOID")
 
-nh_blkgrps_sf <- nh_blkgrps_hevac %>% 
+me_blkgrps_sf <- me_blkgrps_hevac %>% 
   as.data.frame() %>% 
   mutate(NewEngHH = Proportion*eng_hhE,
          NewAge25Up = Proportion*age25upE) %>% 
@@ -84,50 +84,48 @@ nh_blkgrps_sf <- nh_blkgrps_hevac %>%
            percent_rank(sum_NewPov/sum_NewPop) >= 0.8 |
            percent_rank(sum_NewLths/sum_NewAge25Up) >= 0.8) %>% 
   transmute(GEOID = GEOID, hevacRisk = "H") %>% 
-  left_join(nh_blkgrps_sf,., by="GEOID")
+  left_join(me_blkgrps_sf,., by="GEOID")
 
 
 #create layer of municipalities
-nh_towns <- county_subdivisions("NH") %>% 
+me_towns <- county_subdivisions("ME") %>% 
   filter(NAME != "County subdivisions not defined") %>%  
   st_transform(., crs = 4326) %>% 
   select(NAME,NAMELSAD)
 
 # Assign municipality names to block groups
-nh_blkgrps_sf <- county_subdivisions("NH") %>% 
-  st_transform(., crs = st_crs(nh_blkgrps_sf)) %>% 
+me_blkgrps_sf <- county_subdivisions("ME") %>% 
+  st_transform(., crs = st_crs(me_blkgrps_sf)) %>% 
   transmute(TOWN = NAMELSAD) %>% 
-  st_join(nh_blkgrps_sf, ., largest = TRUE) %>% 
-  mutate(NAME = str_remove_all(NAME, ", New Hampshire")) %>% 
+  st_join(me_blkgrps_sf, ., largest = TRUE) %>% 
+  mutate(NAME = str_remove_all(NAME, ", Maine")) %>% 
   st_transform(., crs = 4326)
 
 # create layer of state house districts
-house_districts <- geojson_read("https://opendata.arcgis.com/datasets/f264be37ee714132b268924c44b91803_2.geojson", what = "sp") %>% 
-  st_as_sf(.) %>% 
-  transmute(REP_DIST = NHHouse201) %>%
-  st_transform(., crs = 4326) %>% 
+house_districts <- st_read("../DATA/shapefiles/Maine_House_Districts_2013_GeoLibrary-shp", "Maine_House_Districts_2013_GeoLibrary") %>%
+  transmute(REP_DIST = HD2013) %>% 
+  st_transform(., crs = 4326) %>%
   st_make_valid()
 
 # create layer of state senate districts
-senate_districts <- geojson_read("https://opendata.arcgis.com/datasets/df824f020357423b9f23384f80d9e2d1_4.geojson", what = "sp") %>% 
-  st_as_sf(.) %>% 
-  transmute(SEN_DIST = Senate2012) %>% 
-  st_transform(., crs = 4326) %>% 
+senate_districts <- st_read("../DATA/shapefiles/Maine_State_Senate_Districts_2013_GeoLibrary-shp", "Maine_State_Senate_Districts_2013_GeoLibrary") %>%
+  transmute(SEN_DIST = SD2013) %>% 
+  st_transform(., crs = 4326) %>%
   st_make_valid()
 
 # Assign state house district names to block groups
-nh_blkgrps_sf <- house_districts %>% 
+me_blkgrps_sf <- house_districts %>% 
   select(REP_DIST) %>% 
-  st_join(nh_blkgrps_sf, ., largest = TRUE)
+  st_join(me_blkgrps_sf, ., largest = TRUE)
 
 # Assign state senate district names to block groups
-nh_blkgrps_sf <- senate_districts %>% 
+me_blkgrps_sf <- senate_districts %>% 
   select(SEN_DIST) %>% 
-  st_join(nh_blkgrps_sf, ., largest = TRUE)
+  st_join(me_blkgrps_sf, ., largest = TRUE)
 
 
 # Create labeling variables to identify pops of a concern in a given block group that contributed to cumulative burden score
-nh_blkgrps_sf <- nh_blkgrps_sf %>% 
+me_blkgrps_sf <- me_blkgrps_sf %>% 
   mutate(Minority80th = if_else(percent_rank(minority_pctE) >= 0.8, "People of Color","NA"),
     Under5_80th = if_else(percent_rank(pct_under5E) >= 0.8, "Under 5", "NA"),
     Under18_80th = if_else(percent_rank(pct_under18E) >= 0.8, "Under 18", "NA"),
@@ -153,9 +151,9 @@ nh_blkgrps_sf <- nh_blkgrps_sf %>%
 
 
 # Calculate Pop and Pct pop at risk by jurisdiction
-NFHZAbyTown <- nh_blkgrps_nfhza %>% 
+NFHZAbyTown <- me_blkgrps_nfhza %>% 
   transmute(NewPop = NewPop, OldArea = as.numeric(st_area(.))) %>% 
-  st_intersection(st_transform(nh_towns, st_crs(nh_blkgrps_nfhza))) %>% 
+  st_intersection(st_transform(me_towns, st_crs(me_blkgrps_nfhza))) %>% 
   mutate(NewArea = as.numeric(st_area(.)),
          Proportion = NewArea/OldArea,
          nfhzaPop = as.integer(NewPop*Proportion)) %>% 
@@ -166,28 +164,29 @@ NFHZAbyTown <- nh_blkgrps_nfhza %>%
 # download town pops from tidycensus
 town_pops <- get_acs(geography = "county subdivision", survey = "acs5",
                      variables = c(totalpop = "B03002_001"),
-                     state = "NH", output = "wide", year = 2018) %>% 
+                     state = "ME", output = "wide", year = 2018) %>% 
   select(GEOID, totalpopE)
 
 # grab municipal boundaries from TIGRIS
-nh_towns_sf <- county_subdivisions(state = "NH") %>% 
+me_towns_sf <- county_subdivisions(state = "ME") %>% 
   st_transform(., crs = 26986)
 
 # create df with town names from tigris and pops from tidycensus
-town_nfhzaPop_pct <- nh_towns_sf %>% 
+town_nfhzaPop_pct <- me_towns_sf %>% 
   as.data.frame() %>% 
   left_join(., town_pops, by = "GEOID") %>% 
   select(NAMELSAD, totalpopE) %>% 
   left_join(., NFHZAbyTown,by = "NAMELSAD") %>% 
   replace_na(list(nfhzaPop = 0)) %>% 
-  mutate(PctPopNFHZA = if_else(totalpopE == 0, 0, nfhzaPop/totalpopE*100))
+  mutate(totalpopE = if_else(totalpopE < nfhzaPop, nfhzaPop, totalpopE),
+         PctPopNFHZA = if_else(totalpopE == 0, 0, nfhzaPop/totalpopE*100))
 
 
 # repeat for hurricanes
 # Calculate Pop and Pct pop at risk by jurisdiction
-HEVACbyTown <- nh_blkgrps_hevac %>% 
+HEVACbyTown <- me_blkgrps_hevac %>% 
   transmute(NewPop = NewPop, OldArea = as.numeric(st_area(.))) %>% 
-  st_intersection(st_transform(nh_towns, st_crs(nh_blkgrps_hevac))) %>% 
+  st_intersection(st_transform(me_towns, st_crs(me_blkgrps_hevac))) %>% 
   mutate(NewArea = as.numeric(st_area(.)),
          Proportion = NewArea/OldArea,
          hevacPop = as.integer(NewPop*Proportion)) %>% 
@@ -205,15 +204,15 @@ town_floodPop_pct <- town_nfhzaPop_pct %>%
 # calculate flood pops by house district
 # create pop totals for each district
 house_names_pops <- get_acs(geography = "block group", survey = "acs5",
-                     variables = c(totalpop = "B03002_001"), state = "NH", 
+                     variables = c(totalpop = "B03002_001"), state = "ME", 
                      output = "wide", year = 2018, geometry = TRUE) %>% 
   select(GEOID, totalpopE) %>% 
-  st_transform(.,st_crs(nh_blkgrps_nfhza)) %>% 
+  st_transform(.,st_crs(me_blkgrps_nfhza)) %>% 
   select(totalpopE) %>% 
   mutate(OldArea = as.numeric(st_area(.))) %>% 
     st_intersection(
       st_make_valid(
-        st_transform(house_districts,st_crs(nh_blkgrps_nfhza))
+        st_transform(house_districts,st_crs(me_blkgrps_nfhza))
         )
       ) %>% 
   mutate(NewArea = as.numeric(st_area(.)),
@@ -224,11 +223,11 @@ house_names_pops <- get_acs(geography = "block group", survey = "acs5",
   summarize(totalpopE = sum(NewPop))
 
 # identify FEMA risk pops by district and calculate pop pct
-NFHZAbyHouse <- nh_blkgrps_nfhza %>% 
+NFHZAbyHouse <- me_blkgrps_nfhza %>% 
   transmute(NewPop = NewPop, OldArea = as.numeric(st_area(.))) %>% 
   st_intersection(
     st_make_valid(
-      st_transform(house_districts, st_crs(nh_blkgrps_nfhza))
+      st_transform(house_districts, st_crs(me_blkgrps_nfhza))
       )
     ) %>% 
   mutate(NewArea = as.numeric(st_area(.)),
@@ -242,11 +241,11 @@ NFHZAbyHouse <- nh_blkgrps_nfhza %>%
   mutate(PctPopNFHZA = nfhzaPop/totalpopE*100)
 
 # identify HEVAC risk pops by district and calculate pop pct, and bring together with FEMA
-house_floodPop_pct <- nh_blkgrps_hevac %>% 
+house_floodPop_pct <- me_blkgrps_hevac %>% 
   transmute(NewPop = NewPop, OldArea = as.numeric(st_area(.))) %>% 
   st_intersection(
     st_make_valid(
-      st_transform(house_districts, st_crs(nh_blkgrps_hevac))
+      st_transform(house_districts, st_crs(me_blkgrps_hevac))
       )
     ) %>% 
   mutate(NewArea = as.numeric(st_area(.)),
@@ -265,15 +264,15 @@ house_floodPop_pct <- nh_blkgrps_hevac %>%
 # calculate flood pops by senate district
 # create pop totals for each district
 senate_names_pops <- get_acs(geography = "block group", survey = "acs5",
-                     variables = c(totalpop = "B03002_001"), state = "NH", 
+                     variables = c(totalpop = "B03002_001"), state = "ME", 
                      output = "wide", year = 2018, geometry = TRUE) %>% 
   select(GEOID, totalpopE) %>% 
-  st_transform(.,st_crs(nh_blkgrps_nfhza)) %>% 
+  st_transform(.,st_crs(me_blkgrps_nfhza)) %>% 
   select(totalpopE) %>% 
   mutate(OldArea = as.numeric(st_area(.))) %>% 
     st_intersection(
       st_make_valid(
-        st_transform(senate_districts,st_crs(nh_blkgrps_nfhza))
+        st_transform(senate_districts,st_crs(me_blkgrps_nfhza))
         )
       ) %>% 
   mutate(NewArea = as.numeric(st_area(.)),
@@ -284,11 +283,11 @@ senate_names_pops <- get_acs(geography = "block group", survey = "acs5",
   summarize(totalpopE = sum(NewPop))
 
 # identify FEMA risk pops by district and calculate pop pct
-NFHZAbySenate <- nh_blkgrps_nfhza %>% 
+NFHZAbySenate <- me_blkgrps_nfhza %>% 
   transmute(NewPop = NewPop, OldArea = as.numeric(st_area(.))) %>% 
   st_intersection(
     st_make_valid(
-      st_transform(senate_districts, st_crs(nh_blkgrps_nfhza))
+      st_transform(senate_districts, st_crs(me_blkgrps_nfhza))
       )
     ) %>% 
   mutate(NewArea = as.numeric(st_area(.)),
@@ -302,11 +301,11 @@ NFHZAbySenate <- nh_blkgrps_nfhza %>%
   mutate(PctPopNFHZA = nfhzaPop/totalpopE*100)
 
 # identify HEVAC risk pops by district and calculate pop pct, and bring together with FEMA
-senate_floodPop_pct <- nh_blkgrps_hevac %>% 
+senate_floodPop_pct <- me_blkgrps_hevac %>% 
   transmute(NewPop = NewPop, OldArea = as.numeric(st_area(.))) %>% 
   st_intersection(
     st_make_valid(
-      st_transform(senate_districts, st_crs(nh_blkgrps_hevac))
+      st_transform(senate_districts, st_crs(me_blkgrps_hevac))
       )
     ) %>% 
   mutate(NewArea = as.numeric(st_area(.)),
@@ -323,45 +322,45 @@ senate_floodPop_pct <- nh_blkgrps_hevac %>%
 
 
 # Create counts of block groups in FEMA flood zones by jurisdiction for popup 
-muniNFHZA <- nh_blkgrps_sf %>%
+muniNFHZA <- me_blkgrps_sf %>%
   as.data.frame() %>%
   filter(nfhzaRisk == "F" & POPSlabel != "No Pops of Concern") %>%
   group_by(TOWN) %>%
   summarize(BGsNFHZA = n())
 
-houseNFHZA <- nh_blkgrps_sf %>%
+houseNFHZA <- me_blkgrps_sf %>%
   as.data.frame() %>%
   filter(nfhzaRisk == "F" & POPSlabel != "No Pops of Concern") %>%
   group_by(REP_DIST) %>%
   summarize(BGsNFHZA = n())
 
-senateNFHZA <- nh_blkgrps_sf %>%
+senateNFHZA <- me_blkgrps_sf %>%
   as.data.frame() %>%
   filter(nfhzaRisk == "F" & POPSlabel != "No Pops of Concern") %>%
   group_by(SEN_DIST) %>%
   summarize(BGsNFHZA = n())
 
 # Create counts of block groups in hurricane evac zones by jurisdiction for popup
-muniHEVAC <- nh_blkgrps_sf %>%
+muniHEVAC <- me_blkgrps_sf %>%
   as.data.frame() %>%
   filter(hevacRisk == "H" & POPSlabel != "No Pops of Concern") %>%
   group_by(TOWN) %>%
   summarize(BGsHEVAC = n())
 
-houseHEVAC <- nh_blkgrps_sf %>%
+houseHEVAC <- me_blkgrps_sf %>%
   as.data.frame() %>%
   filter(hevacRisk == "H" & POPSlabel != "No Pops of Concern") %>%
   group_by(REP_DIST) %>%
   summarize(BGsHEVAC = n())
 
-senateHEVAC <- nh_blkgrps_sf %>%
+senateHEVAC <- me_blkgrps_sf %>%
   as.data.frame() %>%
   filter(hevacRisk == "H" & POPSlabel != "No Pops of Concern") %>%
   group_by(SEN_DIST) %>%
   summarize(BGsHEVAC = n())
 
 # simplify layers for faster loading and join BG stats
-nh_towns <- nh_towns %>% 
+me_towns <- me_towns %>% 
   left_join(., muniNFHZA, by = c("NAMELSAD" = "TOWN")) %>%
   left_join(., muniHEVAC, by = c("NAMELSAD" = "TOWN")) %>%
   replace_na(list(BGsNFHZA = 0, BGsHEVAC = 0)) %>%
@@ -379,13 +378,13 @@ senate_districts <- senate_districts %>%
   replace_na(list(BGsNFHZA = 0, BGsHEVAC = 0)) %>%
   ms_simplify(., keep = 0.1, keep_shapes = TRUE)
 
-# create layer of nh_blkgrps_sf for flood and hurricane
-nh_blkgrps_sf_NFHZA <- nh_blkgrps_sf %>% 
+# create layer of me_blkgrps_sf for flood and hurricane
+me_blkgrps_sf_NFHZA <- me_blkgrps_sf %>% 
   filter(nfhzaRisk == "F" & POPSlabel != "No Pops of Concern") %>% 
   select(NAME, REP_DIST, SEN_DIST, TOWN, POPSlabel, floodtypes) %>% 
   ms_simplify(., keep = 0.1, keep_shapes = TRUE)
 
-nh_blkgrps_sf_HEVAC <- nh_blkgrps_sf %>% 
+me_blkgrps_sf_HEVAC <- me_blkgrps_sf %>% 
   filter(hevacRisk == "H" & POPSlabel != "No Pops of Concern") %>% 
   select(NAME, REP_DIST, SEN_DIST, TOWN, POPSlabel) %>% 
   ms_simplify(., keep = 0.1, keep_shapes = TRUE)
@@ -393,15 +392,14 @@ nh_blkgrps_sf_HEVAC <- nh_blkgrps_sf %>%
 # clean up
 rm(list = ls(pattern = paste("ne_","muni", "hevac", "nfhza", "_tracts_",
                              "houseN", "senateN", "houseH", "senateH",
-                             "nh_blkgrps_sf$", sep = "|")))
+                             "me_blkgrps_sf$", sep = "|")))
 ```
 
-Flood and storm surge are significant risks in New Hampshire. In the event of extensive inland or coastal flooding, evacuation may be required. For individuals and households with limited mobility, either due to inadequate access to transportation options or because of physical limitations, evacuation presents heightened risk. Evacuation may also prove especially difficult for individuals and households due to limited economic resources, difficulty understanding or accessing information, or low trust in official sources of information. 
+Flood and storm surge are significant risks in Maine. In the event of extensive inland or coastal flooding, evacuation may be required. For individuals and households with limited mobility, either due to inadequate access to transportation options or because of physical limitations, evacuation presents heightened risk. Evacuation may also prove especially difficult for individuals and households due to limited economic resources, difficulty understanding or accessing information, or low trust in official sources of information. 
 
-Over 78,000 people in New Hampshire live in a FEMA flood risk zone and over 14,000 live in a hurricane evacuation zone. Households without a car and low income persons are more likely to live in flood zones compared to the general population or other priority populations. Those over 64 years of age and households without a car are more likely to live in a hurricane evacuation zone
-compared to the general population or other priority populations.
+At least 33,000 people in Maine live in a FEMA flood risk zone and over 59,000 live in a hurricane inundation zone. Households without a car, those over 64, low income persons, and the disabled are more likely to live in flood zones compared to the general population or other priority populations. Limited English speaking households, households without a car, and people of color are more likely to live in a hurricane inundation zone compared to the general population or other priority populations.
 
-These interactive figures identify communities across New Hampshire that are most most vulnerable to the risks of inland flooding or coastal storm surge.
+These interactive figures identify communities across Maine that are most most vulnerable to the risks of inland flooding or coastal storm surge.
 
 <br>
 
@@ -411,28 +409,28 @@ These interactive figures identify communities across New Hampshire that are mos
 ```{r mapNFHZA, fig.align="left", fig.cap="Map of Census block groups with the highest concentrations of one or more priority populations living in FEMA flood zones."}
 # create simplified towns layer for faster mapping
 # download state outline
-nh_state <- states(cb = TRUE) %>% 
-  filter(NAME == "New Hampshire")
+me_state <- states(cb = TRUE) %>% 
+  filter(NAME == "Maine")
 # filter out extra polygons, clip out boundaries from water, simplify
-nh_towns_simple <- nh_towns %>% 
+me_towns_simple <- me_towns %>% 
   filter(NAME != "County subdivisions not defined") %>% 
-  ms_clip(., nh_state) %>% 
+  ms_clip(., me_state) %>% 
   ms_simplify(., keep = 0.1, keep_shapes = TRUE)
 
-PopupHouse <- paste0("New Hampshire state House District ", "<b>",house_districts$REP_DIST,"</b>", " has ", "<b>",house_districts$BGsNFHZA,"</b>", " <b>Block Groups</b> with high percentages of priority populations living within FEMA flood zones.")
+PopupHouse <- paste0("Maine state House District ", "<b>",house_districts$REP_DIST,"</b>", " has ", "<b>",house_districts$BGsNFHZA,"</b>", " <b>Block Groups</b> with high percentages of priority populations living within FEMA flood zones.")
 
-PopupSenate <- paste0("New Hampshire state Senate District ", "<b>",senate_districts$SEN_DIST,"</b>", " has ", "<b>",senate_districts$BGsNFHZA,"</b>", " <b>Block Groups</b> with high percentages of priority populations living within FEMA flood zones.")
+PopupSenate <- paste0("Maine state Senate District ", "<b>",senate_districts$SEN_DIST,"</b>", " has ", "<b>",senate_districts$BGsNFHZA,"</b>", " <b>Block Groups</b> with high percentages of priority populations living within FEMA flood zones.")
 
-Popup <- paste0(nh_blkgrps_sf_NFHZA$NAME, "<br/>",
-                "<b>State House District:</b> ", nh_blkgrps_sf_NFHZA$REP_DIST, "<br/>",
-                "<b>State Senate District:</b> ", nh_blkgrps_sf_NFHZA$SEN_DIST, "<br/>",
-                "<b>Town:</b> ", nh_blkgrps_sf_NFHZA$TOWN, "<br/>",
-                "<b>Priority Populations: </b>", nh_blkgrps_sf_NFHZA$POPSlabel, "<br/>",
-                "<b>FEMA flood risks: </b> ", nh_blkgrps_sf_NFHZA$floodtypes)
+Popup <- paste0(me_blkgrps_sf_NFHZA$NAME, "<br/>",
+                "<b>State House District:</b> ", me_blkgrps_sf_NFHZA$REP_DIST, "<br/>",
+                "<b>State Senate District:</b> ", me_blkgrps_sf_NFHZA$SEN_DIST, "<br/>",
+                "<b>Town:</b> ", me_blkgrps_sf_NFHZA$TOWN, "<br/>",
+                "<b>Priority Populations: </b>", me_blkgrps_sf_NFHZA$POPSlabel, "<br/>",
+                "<b>FEMA flood risks: </b> ", me_blkgrps_sf_NFHZA$floodtypes)
 
 leaflet(width = "100%") %>% 
   addProviderTiles(providers$Stamen.TonerLite) %>% 
-  addPolygons(data = nh_towns_simple,
+  addPolygons(data = me_towns_simple,
               weight = 0.7,
               opacity = 1,
               color = "gray",
@@ -470,7 +468,7 @@ leaflet(width = "100%") %>%
                 fillOpacity = 0,
                 bringToFront = TRUE),
               group = "State Senate Districts") %>% 
-  addPolygons(data = nh_blkgrps_sf_NFHZA, 
+  addPolygons(data = me_blkgrps_sf_NFHZA, 
               color = "red",
               weight = 0.5,
               opacity = 0.7,
@@ -488,7 +486,7 @@ leaflet(width = "100%") %>%
   addLegend(colors = "red",
             labels = "Flood Risk + Hi Priority Pops",
             position = "bottomleft") %>% 
-  setView(lng = -71.5, 44, zoom = 7) %>% 
+  setView(lng = -68.97, 45.37, zoom = 6) %>% 
   # addMiniMap() %>% 
   addScaleBar(position = "bottomright") %>% 
   addSearchFeatures(targetGroups  = 'muni', 
@@ -506,19 +504,19 @@ leaflet(width = "100%") %>%
 
 ### Hurricane
 ```{r mapHEVAC, fig.align="left", fig.cap="Map of Census block groups with the highest concentrations of one or more priority populations living in hurricane evacuation zones."}
-PopupHouse <- paste0("New Hampshire state House District ", "<b>",house_districts$REP_DIST,"</b>", " has ", "<b>",house_districts$BGsHEVAC,"</b>", " <b>Block Groups</b> with high percentages of priority populations living within hurricane evacuation zones.")
+PopupHouse <- paste0("Maine state House District ", "<b>",house_districts$REP_DIST,"</b>", " has ", "<b>",house_districts$BGsHEVAC,"</b>", " <b>Block Groups</b> with high percentages of priority populations living within hurricane evacuation zones.")
 
-PopupSenate <- paste0("New Hampshire state Senate District ", "<b>",senate_districts$SEN_DIST,"</b>", " has ", "<b>",senate_districts$BGsHEVAC,"</b>", " <b>Block Groups</b> with high percentages of priority populations living within hurricane evacuation zones.")
+PopupSenate <- paste0("Maine state Senate District ", "<b>",senate_districts$SEN_DIST,"</b>", " has ", "<b>",senate_districts$BGsHEVAC,"</b>", " <b>Block Groups</b> with high percentages of priority populations living within hurricane evacuation zones.")
 
-Popup <- paste0(nh_blkgrps_sf_HEVAC$NAME, "<br/>",
-                "<b>State House District:</b> ", nh_blkgrps_sf_HEVAC$REP_DIST, "<br/>",
-                "<b>State Senate District:</b> ", nh_blkgrps_sf_HEVAC$SEN_DIST, "<br/>",
-                "<b>Town:</b> ", nh_blkgrps_sf_HEVAC$TOWN, "<br/>",
-                "<b>Priority Populations: </b>", nh_blkgrps_sf_HEVAC$POPSlabel)
+Popup <- paste0(me_blkgrps_sf_HEVAC$NAME, "<br/>",
+                "<b>State House District:</b> ", me_blkgrps_sf_HEVAC$REP_DIST, "<br/>",
+                "<b>State Senate District:</b> ", me_blkgrps_sf_HEVAC$SEN_DIST, "<br/>",
+                "<b>Town:</b> ", me_blkgrps_sf_HEVAC$TOWN, "<br/>",
+                "<b>Priority Populations: </b>", me_blkgrps_sf_HEVAC$POPSlabel)
 
 leaflet(width = "100%") %>% 
   addProviderTiles(providers$Stamen.TonerLite) %>% 
-  addPolygons(data = nh_towns_simple,
+  addPolygons(data = me_towns_simple,
               weight = 0.7,
               opacity = 1,
               color = "gray",
@@ -556,7 +554,7 @@ leaflet(width = "100%") %>%
                 fillOpacity = 0,
                 bringToFront = TRUE),
               group = "State Senate Districts") %>% 
-  addPolygons(data = nh_blkgrps_sf_HEVAC, 
+  addPolygons(data = me_blkgrps_sf_HEVAC, 
               color = "red",
               weight = 0.5,
               opacity = 0.7,
@@ -574,7 +572,7 @@ leaflet(width = "100%") %>%
   addLegend(colors = "red",
             labels = "Hurricane Evacuation Risk + Hi Priority Pops",
             position = "bottomleft") %>% 
-  setView(lng = -71.5, 44, zoom = 7) %>% 
+  setView(lng = -68.97, 45.37, zoom = 6) %>% 
   # addMiniMap() %>% 
   addScaleBar(position = "bottomright") %>% 
   addSearchFeatures(targetGroups  = 'muni', 
@@ -596,9 +594,9 @@ These maps show communities (i.e. Census Block Groups) with high percentages of 
 
 The analysis of flood exposure presented here is based on the Federal Emergency Management Agency’s (FEMA) [National Flood Hazard Layer (NFHL)](https://www.fema.gov/national-flood-hazard-layer-nfhl), a digital version of FEMA’s most recent flood maps. Flood risk areas are subject to floods with an Annual Exceedance Probability (AEP) of 1% (also known as a ‘100-year’ flood) and areas subject to 0.2% AEP (also known as a ‘500-year’ flood). Areas within the 1% AEP flood zone are designated by FEMA as Special Flood Hazard Areas, and development within those zones must be covered by flood insurance. Areas within the 0.2% AEP are not currently regulated, but these areas are nevertheless subject to flood risk under more extreme, albeit less frequent, flooding circumstances. 
 
-*Note that digital data on flood risk around Laconia is not currently available from FEMA. Flood risk for areas around Laconia is likely to be underestimated.*
+*Note that digital data on flood risk for most of northern Maine, as well as the southeast corner, is not currently available from FEMA. Flood risk for these areas is likely to be underestimated.*
 
-The analysis of hurricane evacuation risk presented here is based on Hurricane Evacuation Maps produced by the [U.S. Army Corps of Engineers for New England](https://www.nae.usace.army.mil/Missions/Projects-Topics/New Hampshire-Hurricane-Studies/). The maps show Hurricane Evacuation Zones that are recommended to be evacuated during potential worst-case hurricane storm surge inundation. These evacuation zones are based on storm surge modeling by the National Weather Service’s National Hurricane Center using the hydrodynamic [Sea, Lake, and Overland Surges from Hurricanes (SLOSH) model](https://www.nhc.noaa.gov/nationalsurge/) to simulate storm surge from tropical cyclones. 
+The analysis of hurricane evacuation risk presented here is based on Hurricane Evacuation Maps produced by the [U.S. Army Corps of Engineers for New England](https://www.nae.usace.army.mil/Missions/Projects-Topics/Maine-Hurricane-Studies/). The maps show Hurricane Evacuation Zones that are recommended to be evacuated during potential worst-case hurricane storm surge inundation. These evacuation zones are based on storm surge modeling by the National Weather Service’s National Hurricane Center using the hydrodynamic [Sea, Lake, and Overland Surges from Hurricanes (SLOSH) model](https://www.nhc.noaa.gov/nationalsurge/) to simulate storm surge from tropical cyclones. 
 
 Priority populations represent demographic groups that environmental justice policy and research have identified as being especially vulnerable to environmental burdens as a consequence of social or economic disadvantage, physical vulnerability, or historic and persistent discrimination and inequality. These include:
 
@@ -627,12 +625,12 @@ The highlighted areas at risk in the maps represent entire Census block groups. 
 
 ```{r graphFEMA, fig.align="center", fig.cap="Percentage of priority populations living within FEMA flood zones."}
 # Add status variable and recode demographic names
-nh_FloodPops_df %>% 
+me_FloodPops_df %>% 
   mutate(
     Status = case_when(
            Group == "Total Pop" ~ "State avg",
-           PctFlood < nh_FloodPops_df[nh_FloodPops_df$Group=="Total Pop",4] ~ "Below state avg",
-           PctFlood > nh_FloodPops_df[nh_FloodPops_df$Group=="Total Pop",4] ~ "Above state avg"),
+           PctFlood < me_FloodPops_df[me_FloodPops_df$Group=="Total Pop",4] ~ "Below state avg",
+           PctFlood > me_FloodPops_df[me_FloodPops_df$Group=="Total Pop",4] ~ "Above state avg"),
     Group = recode(Group, "Minority" = "People of Color",
                         "No HS Dip" = "No HS Diploma"),
     PctFlood = round(PctFlood,1)) %>% 
@@ -646,23 +644,23 @@ nh_FloodPops_df %>%
            labels = list(format = "{value}%")) %>% 
   hc_xAxis(title = NULL, type = "category", labels = list(step = 1)) %>% 
   hc_tooltip(pointFormat = "{series.name}: {point.y}%") %>% 
-  hc_title(text = "New Hampshire Populations Living within Flood Zones", useHTML = TRUE)
+  hc_title(text = "Maine Populations Living within Flood Zones", useHTML = TRUE)
 ```
 
 <br>
 
 <br>
 
-### Hurrican Evacuation
+### Hurrican Inundation
 
-```{r graphHEVAC, fig.align="center", fig.cap="New Hampshire Populations Living within Hurricane Evacuation Zones."}
+```{r graphHEVAC, fig.align="center", fig.cap="Maine Populations Living within Hurricane Inundation Zones."}
 # Add status variable and recode demographic names
-nh_HevacPops_df %>% 
+me_HevacPops_df %>% 
   mutate(
     Status = case_when(
            Group == "Total Pop" ~ "State avg",
-           PctHevac < nh_HevacPops_df[nh_HevacPops_df$Group=="Total Pop",4] ~ "Below state avg",
-           PctHevac > nh_HevacPops_df[nh_HevacPops_df$Group=="Total Pop",4] ~ "Above state avg"),
+           PctHevac < me_HevacPops_df[me_HevacPops_df$Group=="Total Pop",4] ~ "Below state avg",
+           PctHevac > me_HevacPops_df[me_HevacPops_df$Group=="Total Pop",4] ~ "Above state avg"),
     Group = recode(Group, "Minority" = "People of Color",
                         "No HS Dip" = "No HS Diploma"),
     PctHevac = round(PctHevac,1)) %>% 
@@ -676,7 +674,7 @@ nh_HevacPops_df %>%
            labels = list(format = "{value}%")) %>% 
   hc_xAxis(title = NULL, type = "category", labels = list(step = 1)) %>% 
   hc_tooltip(pointFormat = "{series.name}: {point.y}%") %>% 
-  hc_title(text = "New Hampshire Populations Living within Hurricane Evacuation Zones", useHTML = TRUE)
+  hc_title(text = "Maine Populations Living within Hurricane Evacuation Zones", useHTML = TRUE)
 ```
 
 <br>
@@ -689,9 +687,9 @@ These graphs show population-weighted flood risk or hurricane evacuation exposur
 
 * The analysis of flood exposure presented here is based on the Federal Emergency Management Agency’s (FEMA) [National Flood Hazard Layer (NFHL)](https://www.fema.gov/national-flood-hazard-layer-nfhl), a digital version of FEMA’s most recent flood maps. Flood risk areas are subject to floods with an Annual Exceedance Probability (AEP) of 1% (also known as a ‘100-year’ flood) and areas subject to 0.2% AEP (also known as a ‘500-year’ flood). Areas within the 1% AEP flood zone are designated by FEMA as Special Flood Hazard Areas, and development within those zones must be covered by flood insurance. Areas within the 0.2% AEP are not currently regulated, but these areas are nevertheless subject to flood risk under more extreme, albeit less frequent, flooding circumstances. 
 
-*Note that digital data on flood risk around Laconia is not currently available from FEMA. Flood risk for areas around Laconia is likely to be underestimated.*
+*Note that digital data on flood risk for most of northern Maine, as well as the southeast corner, is not currently available from FEMA. Flood risk for these areas is likely to be underestimated.*
 
-* The analysis of hurricane evacuation risk presented here is based on Hurricane Evacuation Maps produced by the [U.S. Army Corps of Engineers for New England](https://www.nae.usace.army.mil/Missions/Projects-Topics/New Hampshire-Hurricane-Studies/). The maps show Hurricane Evacuation Zones that are recommended to be evacuated during potential worst-case hurricane storm surge inundation. These evacuation zones are based on storm surge modeling by the National Weather Service’s National Hurricane Center using the hydrodynamic [Sea, Lake, and Overland Surges from Hurricanes (SLOSH) model](https://www.nhc.noaa.gov/nationalsurge/) to simulate storm surge from tropical cyclones. 
+* The analysis of hurricane inundation risk presented here is based on Hurricane Evacuation Maps produced by the [U.S. Army Corps of Engineers for New England](https://www.nae.usace.army.mil/Missions/Projects-Topics/Maine-Hurricane-Studies/). The maps show Hurricane Inundation Zones that are recommended to be evacuated during potential worst-case hurricane storm surge inundation. These inundation zones are based on storm surge modeling by the National Weather Service’s National Hurricane Center using the hydrodynamic [Sea, Lake, and Overland Surges from Hurricanes (SLOSH) model](https://www.nhc.noaa.gov/nationalsurge/) to simulate storm surge from tropical cyclones. 
 
 Identifying populations at risk:
 
@@ -805,13 +803,13 @@ senate_floodPop_pct %>%
 
 ### About the tables
 
-These tables show the number and percentage of the general population by jurisdiction exposed to FEMA flood risk or hurricane evacuation risk. FEMA flood risk is calculated as the percentage of a Census block group that falls within 100-year or 500-year flood risk zones and aggregated by jurisdiction. Hurricane evacuation risk is calculated as the percentage of a Census block group that falls within hurricane evacuation zones identified by the New Hampshire Emergency Management Agency and U.S. Army Corps of Engineers, and aggregated by jurisdiction. Population values are derived from the American Community Survey 5-year estimates for 2014-2018.
+These tables show the number and percentage of the general population by jurisdiction exposed to FEMA flood risk or hurricane evacuation risk. FEMA flood risk is calculated as the percentage of a Census block group that falls within 100-year or 500-year flood risk zones and aggregated by jurisdiction. Hurricane evacuation risk is calculated as the percentage of a Census block group that falls within hurricane evacuation zones identified by the Maine Emergency Management Agency and U.S. Army Corps of Engineers, and aggregated by jurisdiction. Population values are derived from the American Community Survey 5-year estimates for 2014-2018.
 
 * The analysis of flood exposure presented here is based on the Federal Emergency Management Agency’s (FEMA) [National Flood Hazard Layer (NFHL)](https://www.fema.gov/national-flood-hazard-layer-nfhl), a digital version of FEMA’s most recent flood maps. Flood risk areas are subject to floods with an Annual Exceedance Probability (AEP) of 1% (also known as a ‘100-year’ flood) and areas subject to 0.2% AEP (also known as a ‘500-year’ flood). Areas within the 1% AEP flood zone are designated by FEMA as Special Flood Hazard Areas, and development within those zones must be covered by flood insurance. Areas within the 0.2% AEP are not currently regulated, but these areas are nevertheless subject to flood risk under more extreme, albeit less frequent, flooding circumstances. 
 
-*Note that digital data on flood risk around Laconia is not currently available from FEMA. Flood risk for areas around Laconia is likely to be underestimated.*
+*Note that digital data on flood risk for most of northern Maine, as well as the southeast corner, is not currently available from FEMA. Flood risk for these areas is likely to be underestimated.*
 
-* The analysis of hurricane evacuation risk presented here is based on Hurricane Evacuation Maps produced by the [U.S. Army Corps of Engineers for New England](https://www.nae.usace.army.mil/Missions/Projects-Topics/New Hampshire-Hurricane-Studies/). The maps show Hurricane Evacuation Zones that are recommended to be evacuated during potential worst-case hurricane storm surge inundation. These evacuation zones are based on storm surge modeling by the National Weather Service’s National Hurricane Center using the hydrodynamic [Sea, Lake, and Overland Surges from Hurricanes (SLOSH) model](https://www.nhc.noaa.gov/nationalsurge/) to simulate storm surge from tropical cyclones. 
+* The analysis of hurricane evacuation risk presented here is based on Hurricane Evacuation Maps produced by the [U.S. Army Corps of Engineers for New England](https://www.nae.usace.army.mil/Missions/Projects-Topics/Maine-Hurricane-Studies/). The maps show Hurricane Evacuation Zones that are recommended to be evacuated during potential worst-case hurricane storm surge inundation. These evacuation zones are based on storm surge modeling by the National Weather Service’s National Hurricane Center using the hydrodynamic [Sea, Lake, and Overland Surges from Hurricanes (SLOSH) model](https://www.nhc.noaa.gov/nationalsurge/) to simulate storm surge from tropical cyclones. 
 
 Identifying populations at risk:
 
